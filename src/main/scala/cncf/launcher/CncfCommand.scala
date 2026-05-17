@@ -57,12 +57,15 @@ object CncfCommand {
     case Auto, Global, Project
   }
 
+  case object Version extends CncfCommand
   case object Help extends CncfCommand
 }
 
 object CncfCommandParser {
   def parse(args: Vector[String]): CncfCommand = {
-    if (args.isEmpty || args.contains("--help") || args.contains("-h")) {
+    if (args == Vector("--version") || args == Vector("version") || args == Vector("launcher", "version")) {
+      CncfCommand.Version
+    } else if (args.isEmpty || args.contains("--help") || args.contains("-h")) {
       CncfCommand.Help
     } else {
       val (runtimeversion, runtimedevdir, rest) = _take_global_runtime_options(args)
@@ -292,6 +295,9 @@ object CncfCommandParser {
 
   val helpText: String =
     """Usage:
+      |  cncf --version
+      |  cncf version
+      |  cncf launcher version
       |  cncf dev classpath [--project <dir>]
       |  cncf dev check [--project <dir>] [--runtime-dev-dir <dir>]
       |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]

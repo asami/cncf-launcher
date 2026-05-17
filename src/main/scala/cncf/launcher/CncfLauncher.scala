@@ -16,6 +16,9 @@ final class CncfLauncher(
     val config = LauncherConfig.load(paths)
     val command = CncfCommandParser.parse(args)
     command match {
+      case CncfCommand.Version =>
+        println(s"${LauncherBuildInfo.name} ${LauncherBuildInfo.version}")
+        0
       case CncfCommand.Help =>
         println(CncfCommandParser.helpText)
         0

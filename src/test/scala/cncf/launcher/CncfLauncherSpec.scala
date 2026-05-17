@@ -11,6 +11,7 @@ object CncfLauncherSpec {
   def main(args: Array[String]): Unit = {
     val spec = new CncfLauncherSpec
     spec.parser()
+    spec.launcherVersion()
     spec.configMerge()
     spec.runtimeVersionPrecedence()
     spec.runtimeUseWritesExpectedFiles()
@@ -41,6 +42,17 @@ final class CncfLauncherSpec {
       .asInstanceOf[CncfCommand.Runtime.Use]
     _assert_equals(autouse.version, "latest")
     _assert_equals(autouse.target, CncfCommand.RuntimeUseTarget.Auto)
+  }
+
+  def launcherVersion(): Unit = _with_temp_paths { paths =>
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    val (code, output) = _capture_stdout {
+      launcher.run(Vector("--version"))
+    }
+    _assert_equals(code, 0)
+    _assert_equals(output.trim, s"${LauncherBuildInfo.name} ${LauncherBuildInfo.version}")
+    _assert_equals(CncfCommandParser.parse(Vector("version")), CncfCommand.Version)
+    _assert_equals(CncfCommandParser.parse(Vector("launcher", "version")), CncfCommand.Version)
   }
 
   def configMerge(): Unit = _with_temp_paths { paths =>
@@ -368,6 +380,14 @@ final class CncfLauncherSpec {
     val build = Files.readString(Path.of("build.sbt"))
     assert(!build.contains("libraryDependencies +="))
     assert(!build.contains("libraryDependencies ++="))
+  }
+
+  private def _capture_stdout(f: => Int): (Int, String) = {
+    val out = new java.io.ByteArrayOutputStream()
+    val code = Console.withOut(new java.io.PrintStream(out)) {
+      f
+    }
+    (code, out.toString)
   }
 
   private def _with_temp_paths(f: LauncherPaths => Unit): Unit = {
