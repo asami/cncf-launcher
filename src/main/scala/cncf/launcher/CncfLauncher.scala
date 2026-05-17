@@ -4,7 +4,7 @@ import java.nio.file.Files
 
 /*
  * @since   May. 17, 2026
- * @version May. 17, 2026
+ * @version May. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -154,7 +154,10 @@ final class CncfLauncher(
     mode: String,
     args: Vector[String]
   ): Int = {
-    val runtimeclasspath = runtimeresolver.resolve(context.runtimeVersion, config, effectivepaths)
+    val runtimeclasspath = context.runtimeDevDir match {
+      case Some(dir) => devsupport.cncfRuntimeClasspath(dir)
+      case None => runtimeresolver.resolve(context.runtimeVersion, config, effectivepaths)
+    }
     val devclasspath = devsupport.runtimeClasspath(context)
     val cncfargs = devsupport.cncfArgs(context, mode, args)
     _with_dev_system_properties(context) {
@@ -169,7 +172,8 @@ final class CncfLauncher(
       "cncf.server.port" -> context.port,
       "textus.server.port" -> context.port,
       "cncf.http.baseurl" -> s"http://127.0.0.1:${context.port}",
-      "textus.http.baseurl" -> s"http://127.0.0.1:${context.port}"
+      "textus.http.baseurl" -> s"http://127.0.0.1:${context.port}",
+      "user.dir" -> context.project.toString
     )
     val old = updates.map { case (k, _) => k -> sys.props.get(k) }
     try {

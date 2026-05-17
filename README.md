@@ -19,6 +19,7 @@ cncf runtime use newest
 cncf dev classpath
 cncf dev check
 cncf dev server
+cncf dev server --runtime-dev-dir ../cncf
 cncf dev server-emulation my-component.my-service.my-operation
 ```
 
@@ -31,6 +32,15 @@ target/cncf.d/runtime-classpath.txt
 `cncf dev server` invokes `org.goldenport.cncf.CncfMain` in the same JVM and
 passes the current project as a CNCF `component-dev-dir`. Existing project
 scripts may remain as wrappers during migration.
+
+Use `--runtime-dev-dir <dir>` or `runtime.devDir` to run against a local CNCF
+runtime checkout instead of a published runtime artifact. This is for CNCF core
+development; component source directories still use `--component-dev-dir`.
+
+Runtime arguments placed before the operation selector are forwarded before
+`server`, `client`, or `command`, for example `cncf dev command --repository-dir
+repository.d minimal.main.hello`. Use `--no-project-classpath` when invoking
+packaged CAR/SAR artifacts without the current project classpath.
 
 ## Configuration
 
@@ -48,6 +58,7 @@ Example:
 ```yaml
 runtime:
   version: recommended
+  devDir: ../cncf
   catalog:
     url: https://www.simplemodeling.org/repository/textus/runtime-catalog.yaml
 
@@ -68,10 +79,11 @@ not read as launcher configuration.
 
 Runtime version selection is the same model as `textus`:
 
-1. `--runtime <version>`
-2. `$PWD/.cncf/version`
-3. `~/.cncf/version`
-4. `recommended`
+1. `--runtime-dev-dir <dir>` / `runtime.devDir` for dev commands only
+2. `--runtime <version>`
+3. `$PWD/.cncf/version`
+4. `~/.cncf/version`
+5. `recommended`
 
 `cncf runtime use <version>` writes project scope when the current directory
 already has `.cncf/`; otherwise it writes global scope. Use `--project` or

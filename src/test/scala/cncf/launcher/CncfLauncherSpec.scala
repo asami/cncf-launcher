@@ -4,7 +4,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 17, 2026
+ * @version May. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -19,6 +19,12 @@ object CncfLauncherSpec {
     spec.runtimeCatalogCommands()
     spec.devParser()
     spec.devServerRewritesToCncfArgs()
+    spec.devServerUsesRuntimeDevelopmentDirectory()
+    spec.devCommandPassesRuntimeLeadingArgs()
+    spec.devCommandKeepsSampleMainClassValueAsRuntimeArg()
+    spec.devCommandCanDisableProjectClasspath()
+    spec.devCommandCanDisableProjectComponentDevDir()
+    spec.devCommandAutoActivatesComponentDirArtifacts()
     spec.devServerEmulationRewritesToCncfArgs()
     spec.devProjectLoadsTargetProjectConfig()
     spec.devCheckReportsMissingClasspath()
@@ -41,6 +47,7 @@ final class CncfLauncherSpec {
     _write(paths.cncfHome.resolve("config.yaml"),
       """runtime:
         |  version: 0.1.0
+        |  devDir: ../global-cncf
         |  catalog:
         |    url: https://global.example/catalog.yaml
         |dev:
@@ -56,6 +63,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
       """runtime:
         |  version: 0.2.0
+        |  devDir: ../project-cncf
         |dev:
         |  project: .
         |  componentDevDirs:
@@ -66,6 +74,7 @@ final class CncfLauncherSpec {
         |""".stripMargin)
     val config = LauncherConfig.load(paths)
     _assert_equals(config.runtimeVersion, Some("0.2.0"))
+    _assert_equals(config.runtimeDevDir, Some("../project-cncf"))
     _assert_equals(config.runtimeCatalogUrl, Some("https://global.example/catalog.yaml"))
     _assert_equals(config.devProject, Some("."))
     _assert_equals(config.devPort, Some("19000"))
@@ -144,15 +153,20 @@ final class CncfLauncherSpec {
   def devParser(): Unit = {
     val server = CncfCommandParser.parse(Vector(
       "--runtime", "0.4.7",
+      "--runtime-dev-dir", "/tmp/cncf",
       "dev", "server",
       "--project", "/tmp/blog",
       "--port", "19599",
-      "--component-dev-dir", "../account"
+      "--component-dev-dir", "../account",
+      "--repository-dir", "repository.d"
     )).asInstanceOf[CncfCommand.Dev.Server]
     _assert_equals(server.options.runtimeVersion, Some("0.4.7"))
     _assert_equals(server.options.project, Some("/tmp/blog"))
+    _assert_equals(server.options.runtimeDevDir, Some("/tmp/cncf"))
     _assert_equals(server.options.port, Some("19599"))
     _assert_equals(server.options.componentDevDirs, Vector("../account"))
+    _assert_equals(server.options.runtimeArgs, Vector("--repository-dir", "repository.d"))
+    _assert_equals(server.options.projectActivation, CncfCommand.ProjectActivation.Auto)
 
     val command = CncfCommandParser.parse(Vector("dev", "command", "blog.post.search", "limit=10"))
       .asInstanceOf[CncfCommand.Dev.Command]
@@ -183,15 +197,110 @@ final class CncfLauncherSpec {
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     launcher.run(Vector("dev", "server"))
-    _assert_equals(invoker.lastArgs.take(6), Vector(
+    _assert_equals(invoker.lastArgs.take(4), Vector(
       "--component-dev-dir",
       paths.cwd.toString,
       "--component-dev-dir",
-      paths.cwd.getParent.resolve("account").toAbsolutePath.normalize.toString,
-      "--no-exit",
-      "--cncf.server.port=19600"
+      paths.cwd.getParent.resolve("account").toAbsolutePath.normalize.toString
     ))
     assert(invoker.lastArgs.contains("server"))
+    assert(invoker.lastClasspath.contains(classdir))
+  }
+
+  def devServerUsesRuntimeDevelopmentDirectory(): Unit = _with_temp_paths { paths =>
+    val appclassdir = paths.cwd.resolve("target").resolve("scala-3.3.7").resolve("classes")
+    val runtimeproject = paths.cwd.resolve("cncf-runtime")
+    val runtimeclassdir = runtimeproject.resolve("target").resolve("scala-3.3.7").resolve("classes")
+    Files.createDirectories(appclassdir)
+    Files.createDirectories(runtimeclassdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), appclassdir.toString)
+    _write(runtimeproject.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), runtimeclassdir.toString)
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+    launcher.run(Vector("dev", "server", "--runtime-dev-dir", "cncf-runtime"))
+    _assert_equals(resolver.resolvedClasspaths, Vector.empty)
+    assert(invoker.lastClasspath.contains(runtimeclassdir))
+    assert(invoker.lastClasspath.contains(appclassdir))
+  }
+
+  def devCommandPassesRuntimeLeadingArgs(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    launcher.run(Vector(
+      "dev", "command",
+      "--repository-dir", "repository.d",
+      "--component-car-dir", "car.d",
+      "--textus.runtime.component=minimal",
+      "minimal.main.hello",
+      "--format", "yaml"
+    ))
+    val commandindex = invoker.lastArgs.indexOf("command")
+    assert(commandindex > 0)
+    _assert_equals(invoker.lastArgs.slice(commandindex - 5, commandindex), Vector(
+      "--repository-dir", "repository.d",
+      "--component-car-dir", "car.d",
+      "--textus.runtime.component=minimal"
+    ))
+    _assert_equals(invoker.lastArgs.drop(commandindex), Vector("command", "minimal.main.hello", "--format", "yaml"))
+  }
+
+  def devCommandKeepsSampleMainClassValueAsRuntimeArg(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    launcher.run(Vector(
+      "dev", "command",
+      "--sample-main-class", "sample.Main",
+      "minimal.main.hello"
+    ))
+    val commandindex = invoker.lastArgs.indexOf("command")
+    assert(commandindex > 0)
+    _assert_equals(invoker.lastArgs.slice(commandindex - 2, commandindex), Vector(
+      "--sample-main-class", "sample.Main"
+    ))
+    _assert_equals(invoker.lastArgs.drop(commandindex), Vector("command", "minimal.main.hello"))
+  }
+
+  def devCommandCanDisableProjectClasspath(): Unit = _with_temp_paths { paths =>
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    val code = launcher.run(Vector("dev", "command", "--no-project-classpath", "--repository-dir", "repository.d", "minimal.main.hello"))
+    _assert_equals(code, 0)
+    assert(invoker.lastArgs.contains("--repository-dir"))
+    assert(!invoker.lastArgs.contains(paths.cwd.toAbsolutePath.normalize.toString))
+  }
+
+  def devCommandCanDisableProjectComponentDevDir(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    val code = launcher.run(Vector("dev", "command", "--no-project-component-dev-dir", "--discover=classes", "minimal.main.hello"))
+    _assert_equals(code, 0)
+    assert(invoker.lastClasspath.contains(classdir))
+    assert(!invoker.lastArgs.contains("--component-dev-dir"))
+    assert(invoker.lastArgs.contains("--discover=classes"))
+  }
+
+
+  def devCommandAutoActivatesComponentDirArtifacts(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("component.d").resolve("testcomp.car"), "fake-car")
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    val code = launcher.run(Vector("dev", "command", "testcomp.main.hello"))
+    _assert_equals(code, 0)
+    _assert_equals(invoker.lastArgs.take(2), Vector("--component-dir", paths.cwd.resolve("component.d").toString))
+    assert(!invoker.lastArgs.contains("--component-dev-dir"))
     assert(invoker.lastClasspath.contains(classdir))
   }
 
@@ -228,8 +337,8 @@ final class CncfLauncherSpec {
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     launcher.run(Vector("dev", "server", "--project", "blog"))
-    assert(invoker.lastArgs.contains("--cncf.server.port=19700"))
     assert(invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString))
+    assert(!invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")))
   }
 
   def devCheckReportsMissingClasspath(): Unit = _with_temp_paths { paths =>

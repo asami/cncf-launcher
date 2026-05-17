@@ -5,11 +5,12 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 17, 2026
+ * @version May. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
   runtimeVersion: Option[String] = None,
+  runtimeDevDir: Option[String] = None,
   runtimeCatalogUrl: Option[String] = None,
   devProject: Option[String] = None,
   devPort: Option[String] = None,
@@ -22,6 +23,7 @@ final case class LauncherConfig(
   def mergeHigher(higher: LauncherConfig): LauncherConfig =
     LauncherConfig(
       runtimeVersion = higher.runtimeVersion.orElse(runtimeVersion),
+      runtimeDevDir = higher.runtimeDevDir.orElse(runtimeDevDir),
       runtimeCatalogUrl = higher.runtimeCatalogUrl.orElse(runtimeCatalogUrl),
       devProject = higher.devProject.orElse(devProject),
       devPort = higher.devPort.orElse(devPort),
@@ -103,6 +105,7 @@ object LauncherConfig {
 
     LauncherConfig(
       runtimeVersion = _first_("runtime.version", "cncf.runtime.version", "version"),
+      runtimeDevDir = _first_("runtime.devDir", "runtime.dev.dir", "cncf.runtime.devDir", "cncf.runtime.dev.dir"),
       runtimeCatalogUrl = _first_("runtime.catalog.url", "cncf.runtime.catalog.url", "catalog.url"),
       devProject = _first_("dev.project", "cncf.dev.project"),
       devPort = _first_("dev.port", "cncf.dev.port"),
@@ -117,6 +120,7 @@ object LauncherConfig {
   def render(config: LauncherConfig): String = {
     val c = config.normalizedWithDefaults
     val runtime = c.runtimeVersion.getOrElse("(not configured)")
+    val runtimedevdir = c.runtimeDevDir.getOrElse("(not configured)")
     val catalog = c.runtimeCatalogUrl.getOrElse("(not configured)")
     val cars = c.carRepositories.mkString(", ")
     val sars = c.sarRepositories.mkString(", ")
@@ -126,6 +130,7 @@ object LauncherConfig {
     val devport = c.devPort.getOrElse(LauncherConfig.DEFAULT_DEV_PORT)
     val devdirs = c.devComponentDevDirs.mkString(", ")
     s"""runtime.version: $runtime
+       |runtime.devDir: $runtimedevdir
        |runtime.catalog.url: $catalog
        |dev.project: $devproject
        |dev.port: $devport

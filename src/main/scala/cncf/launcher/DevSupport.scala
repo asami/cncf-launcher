@@ -7,18 +7,27 @@ import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version May. 17, 2026
+ * @version May. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
   project: Path,
   port: String,
   componentDevDirs: Vector[Path],
+  componentDirs: Vector[Path],
   runtimeVersion: String,
+  runtimeDevDir: Option[Path],
+  runtimeArgs: Vector[String],
+  useProjectClasspath: Boolean,
+  projectActivation: CncfCommand.ProjectActivation,
+  includeProjectComponentDevDir: Boolean,
   passthrough: Vector[String]
 ) {
   def classpathFile: Path =
-    project.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")
+    DevSupport.runtimeClasspathFile(project)
+
+  def runtimeLabel: String =
+    runtimeDevDir.map(p => s"dev:${p}").getOrElse(runtimeVersion)
 }
 
 final class DevSupport(paths: LauncherPaths) {
@@ -28,15 +37,33 @@ final class DevSupport(paths: LauncherPaths) {
     store: RuntimeVersionStore
   ): DevContext = {
     val project = _resolve_project(options, config)
-    val devdirs = (Vector(project.toString) ++ config.devComponentDevDirs ++ options.componentDevDirs)
+    val projectactivation = _resolve_project_activation(project, options)
+    val projectdevdirs = projectactivation match {
+      case CncfCommand.ProjectActivation.DevDir => Vector(project)
+      case _ => Vector.empty
+    }
+    val projectcomponentdirs = projectactivation match {
+      case CncfCommand.ProjectActivation.ComponentDir => Vector(project.resolve("component.d"))
+      case _ => Vector.empty
+    }
+    val devdirs = (projectdevdirs.map(_.toString) ++ config.devComponentDevDirs ++ options.componentDevDirs)
       .map(p => project.resolve(p).normalize)
+      .map(_.toAbsolutePath.normalize)
+      .distinct
+    val componentdirs = projectcomponentdirs
       .map(_.toAbsolutePath.normalize)
       .distinct
     DevContext(
       project = project,
       port = options.port.orElse(config.devPort).getOrElse(LauncherConfig.DEFAULT_DEV_PORT),
       componentDevDirs = devdirs,
+      componentDirs = componentdirs,
       runtimeVersion = store.current(options.runtimeVersion, config),
+      runtimeDevDir = _resolve_runtime_dev_dir(project, options, config),
+      runtimeArgs = options.runtimeArgs,
+      useProjectClasspath = options.useProjectClasspath,
+      projectActivation = projectactivation,
+      includeProjectComponentDevDir = options.includeProjectComponentDevDir,
       passthrough = options.passthrough
     )
   }
@@ -57,7 +84,7 @@ final class DevSupport(paths: LauncherPaths) {
     val out = new StringBuilder
     val err = new StringBuilder
     val code = Process(Vector("sbt", "--batch", "export Runtime / fullClasspath"), project.toFile)
-      .!(ProcessLogger(out append _, err append _))
+      .!(ProcessLogger(line => out.append(line).append("\n"), line => err.append(line).append("\n")))
     if (code != 0)
       throw CncfException(s"failed to resolve Runtime / fullClasspath for ${project}: ${err.toString.trim}", 2)
     out.toString.linesIterator
@@ -68,21 +95,30 @@ final class DevSupport(paths: LauncherPaths) {
   }
 
   def check(context: DevContext): Vector[DevCheckItem] = {
-    val classpath = _check_classpath(context)
+    val classpath =
+      if (context.useProjectClasspath) _check_classpath(context)
+      else Vector(DevCheckItem.ok("runtime-classpath", "project classpath disabled"))
     val descriptors = _check_descriptors(context.project)
     val webroots = _check_web_roots(context.project)
+    val runtimedevdir = context.runtimeDevDir.toVector.flatMap(_check_runtime_dev_dir)
     val devdirs = context.componentDevDirs.map { dir =>
-      val file = dir.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")
+      val file = DevSupport.runtimeClasspathFile(dir)
       if (Files.isRegularFile(file) && Files.size(file) > 0L)
         DevCheckItem.ok("component-dev-dir", s"${dir} (${file})")
       else
         DevCheckItem.error("component-dev-dir", s"${dir} missing ${file}; run cncf dev classpath --project ${dir}")
     }
+    val componentdirs = context.componentDirs.map { dir =>
+      if (Files.isDirectory(dir))
+        DevCheckItem.ok("component-dir", dir.toString)
+      else
+        DevCheckItem.error("component-dir", s"${dir} is not a directory")
+    }
     Vector(
       DevCheckItem.ok("project", context.project.toString),
-      DevCheckItem.ok("runtime", context.runtimeVersion),
+      DevCheckItem.ok("runtime", context.runtimeLabel),
       DevCheckItem.ok("port", context.port)
-    ) ++ classpath ++ descriptors ++ webroots ++ devdirs
+    ) ++ runtimedevdir ++ classpath ++ descriptors ++ webroots ++ componentdirs ++ devdirs
   }
 
   def cncfArgs(
@@ -91,21 +127,96 @@ final class DevSupport(paths: LauncherPaths) {
     args: Vector[String]
   ): Vector[String] =
     context.componentDevDirs.flatMap(dir => Vector("--component-dev-dir", dir.toString)) ++
-      Vector(
-        "--no-exit",
-        s"--cncf.server.port=${context.port}",
-        s"--cncf.http.baseurl=http://127.0.0.1:${context.port}"
-      ) ++
+      context.componentDirs.flatMap(dir => Vector("--component-dir", dir.toString)) ++
+      context.runtimeArgs ++
       Vector(mode) ++
       args ++
       context.passthrough
 
   def runtimeClasspath(context: DevContext): Vector[Path] = {
-    if (!Files.isRegularFile(context.classpathFile) || Files.size(context.classpathFile) == 0L)
+    if (!context.useProjectClasspath) {
+      Vector.empty
+    } else if (!Files.isRegularFile(context.classpathFile) || Files.size(context.classpathFile) == 0L)
       throw CncfException(
         s"runtime classpath is not prepared: ${context.classpathFile}. Run: cncf dev classpath --project ${context.project}"
       )
-    _classpath_entries(Files.readString(context.classpathFile, StandardCharsets.UTF_8).trim)
+    else {
+      _classpath_entries(Files.readString(context.classpathFile, StandardCharsets.UTF_8).trim)
+    }
+  }
+
+  def cncfRuntimeClasspath(runtimeproject: Path): Vector[Path] = {
+    val file = DevSupport.runtimeClasspathFile(runtimeproject)
+    val classpath =
+      if (Files.isRegularFile(file) && Files.size(file) > 0L) {
+        Files.readString(file, StandardCharsets.UTF_8).trim
+      } else {
+        val exported = exportRuntimeClasspath(runtimeproject)
+        Files.createDirectories(file.getParent)
+        Files.writeString(file, exported + "\n", StandardCharsets.UTF_8)
+        exported
+      }
+    val entries = _classpath_entries(classpath)
+    if (entries.isEmpty)
+      throw CncfException(s"CNCF Runtime / fullClasspath was empty for ${runtimeproject}")
+    entries
+  }
+
+
+  private def _resolve_project_activation(
+    project: Path,
+    options: CncfCommand.DevOptions
+  ): CncfCommand.ProjectActivation =
+    if (!options.useProjectClasspath) {
+      CncfCommand.ProjectActivation.None
+    } else {
+      options.projectActivation match {
+        case CncfCommand.ProjectActivation.Auto =>
+          if (_project_component_dir_has_artifacts(project))
+            CncfCommand.ProjectActivation.ComponentDir
+          else if (_has_explicit_runtime_source(options.runtimeArgs))
+            CncfCommand.ProjectActivation.None
+          else if (options.includeProjectComponentDevDir)
+            CncfCommand.ProjectActivation.DevDir
+          else
+            CncfCommand.ProjectActivation.None
+        case x => x
+      }
+    }
+
+
+  private def _has_explicit_runtime_source(args: Vector[String]): Boolean = {
+    val names = args.map(_.takeWhile(_ != '='))
+    names.exists { name =>
+      Set(
+        "--repository-dir",
+        "--component-dir",
+        "--component-car-dir",
+        "--component-sar-dir",
+        "--component-factory-class",
+        "--subsystem-sar-dir",
+        "--subsystem-dir",
+        "--subsystem"
+      ).contains(name)
+    }
+  }
+
+  private def _project_component_dir_has_artifacts(project: Path): Boolean = {
+    val dir = project.resolve("component.d")
+    if (!Files.isDirectory(dir)) {
+      false
+    } else {
+      val stream = Files.list(dir)
+      try {
+        import scala.jdk.CollectionConverters.*
+        stream.iterator().asScala.exists { path =>
+          val name = path.getFileName.toString
+          Files.isRegularFile(path) && (name.endsWith(".car") || name.endsWith(".sar"))
+        }
+      } finally {
+        stream.close()
+      }
+    }
   }
 
   private def _resolve_project(
@@ -118,6 +229,15 @@ final class DevSupport(paths: LauncherPaths) {
       .getOrElse(paths.cwd)
       .toAbsolutePath
       .normalize
+
+  private def _resolve_runtime_dev_dir(
+    project: Path,
+    options: CncfCommand.DevOptions,
+    config: LauncherConfig
+  ): Option[Path] =
+    options.runtimeDevDir
+      .orElse(config.runtimeDevDir)
+      .map(p => project.resolve(p).normalize.toAbsolutePath.normalize)
 
   private def _check_classpath(context: DevContext): Vector[DevCheckItem] =
     if (!Files.isRegularFile(context.classpathFile)) {
@@ -132,6 +252,17 @@ final class DevSupport(paths: LauncherPaths) {
       else
         Vector(DevCheckItem.ok("runtime-classpath", s"${context.classpathFile} (${entries.size} entries)"))
     }
+
+  private def _check_runtime_dev_dir(dir: Path): Vector[DevCheckItem] = {
+    val file = DevSupport.runtimeClasspathFile(dir)
+    if (!Files.isDirectory(dir)) {
+      Vector(DevCheckItem.error("runtime-dev-dir", s"${dir} is not a directory"))
+    } else if (Files.isRegularFile(file) && Files.size(file) > 0L) {
+      Vector(DevCheckItem.ok("runtime-dev-dir", s"${dir} (${file})"))
+    } else {
+      Vector(DevCheckItem.warning("runtime-dev-dir", s"${dir} missing ${file}; dev invocation will run sbt export Runtime / fullClasspath"))
+    }
+  }
 
   private def _check_descriptors(project: Path): Vector[DevCheckItem] = {
     val dirs = Vector(project.resolve("car.d"), project.resolve("src").resolve("main").resolve("car"))
@@ -158,6 +289,11 @@ final class DevSupport(paths: LauncherPaths) {
       .map(_.trim)
       .filter(_.nonEmpty)
       .map(Path.of(_))
+}
+
+object DevSupport {
+  def runtimeClasspathFile(project: Path): Path =
+    project.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")
 }
 
 final case class DevCheckItem(

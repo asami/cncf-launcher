@@ -9,7 +9,7 @@ import scala.util.Using
 
 /*
  * @since   May. 17, 2026
- * @version May. 17, 2026
+ * @version May. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 trait CncfRuntimeResolver {
@@ -150,8 +150,10 @@ class CncfInvoker {
     val parent = ClassLoader.getPlatformClassLoader
     val loader = new java.net.URLClassLoader(urls, parent)
     val old = Thread.currentThread().getContextClassLoader
+    val oldclasspath = sys.props.get("java.class.path")
     try {
       Thread.currentThread().setContextClassLoader(loader)
+      sys.props.update("java.class.path", classpath.map(_.toString).mkString(java.io.File.pathSeparator))
       val mainclass = Class.forName("org.goldenport.cncf.CncfMain", true, loader)
       val main = mainclass.getMethod("main", classOf[Array[String]])
       main.invoke(null, args.toArray)
@@ -168,6 +170,10 @@ class CncfInvoker {
           throw cause
         }
     } finally {
+      oldclasspath match {
+        case Some(value) => sys.props.update("java.class.path", value)
+        case None => sys.props.remove("java.class.path")
+      }
       Thread.currentThread().setContextClassLoader(old)
       loader.close()
     }

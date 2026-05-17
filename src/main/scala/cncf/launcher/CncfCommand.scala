@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 17, 2026
+ * @version May. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -15,8 +15,13 @@ object CncfCommand {
   final case class DevOptions(
     project: Option[String] = None,
     runtimeVersion: Option[String] = None,
+    runtimeDevDir: Option[String] = None,
     port: Option[String] = None,
     componentDevDirs: Vector[String] = Vector.empty,
+    runtimeArgs: Vector[String] = Vector.empty,
+    useProjectClasspath: Boolean = true,
+    projectActivation: ProjectActivation = ProjectActivation.Auto,
+    includeProjectComponentDevDir: Boolean = true,
     passthrough: Vector[String] = Vector.empty
   )
 
@@ -43,6 +48,11 @@ object CncfCommand {
     final case class ConfigShow() extends Runtime
   }
 
+
+  enum ProjectActivation {
+    case Auto, None, DevDir, ComponentDir
+  }
+
   enum RuntimeUseTarget {
     case Auto, Global, Project
   }
@@ -55,10 +65,10 @@ object CncfCommandParser {
     if (args.isEmpty || args.contains("--help") || args.contains("-h")) {
       CncfCommand.Help
     } else {
-      val (runtimeversion, rest) = _take_global_runtime(args)
+      val (runtimeversion, runtimedevdir, rest) = _take_global_runtime_options(args)
       rest.headOption match {
         case Some("dev") =>
-          _parse_dev(rest.tail, runtimeversion)
+          _parse_dev(rest.tail, runtimeversion, runtimedevdir)
         case Some("runtime") =>
           _parse_runtime(rest.tail)
         case Some(other) =>
@@ -69,9 +79,10 @@ object CncfCommandParser {
     }
   }
 
-  private def _take_global_runtime(args: Vector[String]): (Option[String], Vector[String]) = {
+  private def _take_global_runtime_options(args: Vector[String]): (Option[String], Option[String], Vector[String]) = {
     val out = Vector.newBuilder[String]
     var runtime: Option[String] = None
+    var runtimedevdir: Option[String] = None
     var i = 0
     while (i < args.length) {
       args(i) match {
@@ -83,23 +94,35 @@ object CncfCommandParser {
         case x if x.startsWith("--runtime=") =>
           runtime = Some(x.stripPrefix("--runtime="))
           i += 1
+        case "--runtime-dev-dir" | "--cncf-dev-dir" =>
+          if (i + 1 >= args.length)
+            throw CncfException(s"${args(i)} requires a value")
+          runtimedevdir = Some(args(i + 1))
+          i += 2
+        case x if x.startsWith("--runtime-dev-dir=") =>
+          runtimedevdir = Some(x.stripPrefix("--runtime-dev-dir="))
+          i += 1
+        case x if x.startsWith("--cncf-dev-dir=") =>
+          runtimedevdir = Some(x.stripPrefix("--cncf-dev-dir="))
+          i += 1
         case x =>
           out += x
           i += 1
       }
     }
-    (runtime, out.result())
+    (runtime, runtimedevdir, out.result())
   }
 
   private def _parse_dev(
     args: Vector[String],
-    runtimeversion: Option[String]
+    runtimeversion: Option[String],
+    runtimedevdir: Option[String]
   ): CncfCommand.Dev = {
     if (args.isEmpty)
       throw CncfException("cncf dev requires a subcommand")
     val subcommand = args.head
     val (pre, passthrough) = args.tail.span(_ != "--")
-    val (options, rest) = _parse_dev_options(pre, runtimeversion)
+    val (options, rest) = _parse_dev_options(pre, runtimeversion, runtimedevdir)
     val effectiveoptions =
       if (passthrough.isEmpty) options
       else options.copy(passthrough = passthrough.tail)
@@ -127,12 +150,18 @@ object CncfCommandParser {
 
   private def _parse_dev_options(
     args: Vector[String],
-    runtimeversion: Option[String]
+    runtimeversion: Option[String],
+    globalruntimedevdir: Option[String]
   ): (CncfCommand.DevOptions, Vector[String]) = {
     val rest = Vector.newBuilder[String]
     var project: Option[String] = None
+    var runtimedevdir = globalruntimedevdir
     var port: Option[String] = None
     var componentdevdirs = Vector.empty[String]
+    var runtimeargs = Vector.empty[String]
+    var useprojectclasspath = true
+    var projectactivation = CncfCommand.ProjectActivation.Auto
+    var includeprojectcomponentdevdir = true
     var i = 0
     while (i < args.length) {
       args(i) match {
@@ -143,12 +172,40 @@ object CncfCommandParser {
         case x if x.startsWith("--project=") =>
           project = Some(x.stripPrefix("--project="))
           i += 1
+        case "--runtime-dev-dir" | "--cncf-dev-dir" =>
+          if (i + 1 >= args.length) throw CncfException(s"${args(i)} requires a value")
+          runtimedevdir = Some(args(i + 1))
+          i += 2
+        case x if x.startsWith("--runtime-dev-dir=") =>
+          runtimedevdir = Some(x.stripPrefix("--runtime-dev-dir="))
+          i += 1
+        case x if x.startsWith("--cncf-dev-dir=") =>
+          runtimedevdir = Some(x.stripPrefix("--cncf-dev-dir="))
+          i += 1
         case "--port" =>
           if (i + 1 >= args.length) throw CncfException("--port requires a value")
           port = Some(args(i + 1))
           i += 2
         case x if x.startsWith("--port=") =>
           port = Some(x.stripPrefix("--port="))
+          i += 1
+        case "--no-project-classpath" =>
+          useprojectclasspath = false
+          projectactivation = CncfCommand.ProjectActivation.None
+          includeprojectcomponentdevdir = false
+          i += 1
+        case "--no-project-component-dev-dir" =>
+          projectactivation = CncfCommand.ProjectActivation.None
+          includeprojectcomponentdevdir = false
+          i += 1
+        case "--project-activation" =>
+          if (i + 1 >= args.length) throw CncfException("--project-activation requires a value")
+          projectactivation = _project_activation(args(i + 1))
+          includeprojectcomponentdevdir = projectactivation != CncfCommand.ProjectActivation.None
+          i += 2
+        case x if x.startsWith("--project-activation=") =>
+          projectactivation = _project_activation(x.stripPrefix("--project-activation="))
+          includeprojectcomponentdevdir = projectactivation != CncfCommand.ProjectActivation.None
           i += 1
         case "--component-dev-dir" =>
           if (i + 1 >= args.length) throw CncfException("--component-dev-dir requires a value")
@@ -157,12 +214,58 @@ object CncfCommandParser {
         case x if x.startsWith("--component-dev-dir=") =>
           componentdevdirs :+= x.stripPrefix("--component-dev-dir=")
           i += 1
+        case x if x.startsWith("--") =>
+          runtimeargs :+= x
+          if (!x.contains("=") && _runtime_arg_takes_value(x) && i + 1 < args.length) {
+            runtimeargs :+= args(i + 1)
+            i += 2
+          } else {
+            i += 1
+          }
         case x =>
-          rest += x
-          i += 1
+          rest ++= args.drop(i)
+          i = args.length
       }
     }
-    (CncfCommand.DevOptions(project, runtimeversion, port, componentdevdirs), rest.result())
+    (CncfCommand.DevOptions(
+      project = project,
+      runtimeVersion = runtimeversion,
+      runtimeDevDir = runtimedevdir,
+      port = port,
+      componentDevDirs = componentdevdirs,
+      runtimeArgs = runtimeargs,
+      useProjectClasspath = useprojectclasspath,
+      projectActivation = projectactivation,
+      includeProjectComponentDevDir = includeprojectcomponentdevdir
+    ), rest.result())
+  }
+
+
+  private def _project_activation(value: String): CncfCommand.ProjectActivation =
+    value match {
+      case "auto" => CncfCommand.ProjectActivation.Auto
+      case "none" => CncfCommand.ProjectActivation.None
+      case "dev-dir" => CncfCommand.ProjectActivation.DevDir
+      case "component-dir" => CncfCommand.ProjectActivation.ComponentDir
+      case other => throw CncfException(s"unknown project activation: $other")
+    }
+
+  private def _runtime_arg_takes_value(arg: String): Boolean = {
+    val name = arg.takeWhile(_ != '=')
+    name.startsWith("--textus.") ||
+      name.startsWith("--cncf.") ||
+      Set(
+        "--workspace",
+        "--repository-dir",
+        "--component-dir",
+        "--component-car-dir",
+        "--component-sar-dir",
+        "--component-factory-class",
+        "--sample-main-class",
+        "--subsystem-sar-dir",
+        "--subsystem-dir",
+        "--subsystem"
+      ).contains(name)
   }
 
   private def _parse_runtime(args: Vector[String]): CncfCommand.Runtime =
@@ -190,11 +293,11 @@ object CncfCommandParser {
   val helpText: String =
     """Usage:
       |  cncf dev classpath [--project <dir>]
-      |  cncf dev check [--project <dir>]
-      |  cncf dev server [--project <dir>] [--port <port>] [--component-dev-dir <dir>...]
-      |  cncf dev server-emulation [--project <dir>] <component.service.operation|component/service/operation|url>
-      |  cncf dev client [--project <dir>] [args...]
-      |  cncf dev command [--project <dir>] <operation> [params...]
+      |  cncf dev check [--project <dir>] [--runtime-dev-dir <dir>]
+      |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]
+      |  cncf dev server-emulation [--project <dir>] [--runtime-dev-dir <dir>] <component.service.operation|component/service/operation|url>
+      |  cncf dev client [--project <dir>] [--runtime-dev-dir <dir>] [args...]
+      |  cncf dev command [--project <dir>] [--runtime-dev-dir <dir>] [--project-activation auto|none|dev-dir|component-dir] [--no-project-classpath] [runtime args...] <operation> [params...]
       |  cncf runtime current
       |  cncf runtime list
       |  cncf runtime local list
@@ -211,5 +314,11 @@ object CncfCommandParser {
       |
       |Runtime:
       |  --runtime <version> overrides .cncf/version and ~/.cncf/version.
+      |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
+      |  Runtime args before server/client/command are forwarded to CncfMain.
+      |  --project-activation controls how --project becomes a runtime component source.
+      |  --project-activation auto uses component.d artifacts, suppresses project activation when explicit runtime source args are present, otherwise uses component-dev-dir.
+      |  --no-project-classpath invokes packaged CAR/SAR artifacts without current project classes.
+      |  --no-project-component-dev-dir keeps project classes without adding project as component-dev-dir.
       |""".stripMargin
 }
