@@ -4,13 +4,14 @@ import java.nio.file.Files
 
 /*
  * @since   May. 17, 2026
- * @version May. 18, 2026
+ * @version May. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
   paths: LauncherPaths = LauncherPaths(),
   runtimeresolver: CncfRuntimeResolver = CoursierCncfRuntimeResolver(),
-  cncfinvoker: CncfInvoker = CncfInvoker()
+  cncfinvoker: CncfInvoker = CncfInvoker(),
+  classpathexporter: RuntimeClasspathExporter = SbtRuntimeClasspathExporter
 ) {
   def run(args: Vector[String]): Int = {
     val config = LauncherConfig.load(paths)
@@ -119,7 +120,7 @@ final class CncfLauncher(
     val store = RuntimeVersionStore(effectivepaths)
     val catalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
     val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
-    val devsupport = DevSupport(effectivepaths)
+    val devsupport = DevSupport(effectivepaths, classpathexporter)
     val effectiveoptions = command.options.copy(project = None)
     val context = devsupport.context(effectiveoptions, effectiveconfig, store)
     command match {

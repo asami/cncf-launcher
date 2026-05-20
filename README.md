@@ -29,9 +29,23 @@ cncf dev server-emulation my-component.my-service.my-operation
 target/cncf.d/runtime-classpath.txt
 ```
 
-`cncf dev server` invokes `org.goldenport.cncf.CncfMain` in the same JVM and
-passes the current project as a CNCF `component-dev-dir`. Existing project
-scripts may remain as wrappers during migration.
+`cncf dev server` invokes `org.goldenport.cncf.CncfMain` in the same JVM. It is
+the development-project launcher: `--project <dir>` selects the main target,
+and the current directory is the default main target. The main target is not
+resolved from CAR/SAR repositories in dev mode, even when `project.yaml` says
+`packaging.kind: car`.
+
+The main target uses `target/cncf.d/runtime-classpath.txt`. If the file is
+missing or empty, `cncf dev server`, `cncf dev client`, `cncf dev command`, and
+`cncf dev server-emulation` prepare it automatically from `Runtime /
+fullClasspath`. Use `cncf dev classpath --project <dir>` to prepare it manually.
+
+Dependency components are separate from the main target. Use
+`--component-dev-dir <dir>` or `.cncf/config.yaml` `dev.componentDevDirs` for
+dependencies that are also under local development. Dependencies without local
+overrides are resolved by the CNCF runtime from configured component
+repositories. `textus server <artifact>` is the CAR/SAR artifact launcher for
+repository-based application startup.
 
 Use `--runtime-dev-dir <dir>` or `runtime.devDir` to run against a local CNCF
 runtime checkout instead of a published runtime artifact. This is for CNCF core

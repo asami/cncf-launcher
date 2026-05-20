@@ -4,7 +4,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 18, 2026
+ * @version May. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -28,7 +28,12 @@ object CncfLauncherSpec {
     spec.devCommandAutoActivatesComponentDirArtifacts()
     spec.devServerEmulationRewritesToCncfArgs()
     spec.devProjectLoadsTargetProjectConfig()
-    spec.devCheckReportsMissingClasspath()
+    spec.devHelpExplainsResolutionModel()
+    spec.devCheckReportsMainTargetAndDependencyResolution()
+    spec.devCheckTreatsMissingMainTargetClasspathAsWarning()
+    spec.devCheckTreatsMissingDependencyClasspathAsError()
+    spec.devServerAutoGeneratesMainTargetClasspath()
+    spec.devServerReportsMainTargetClasspathExportFailure()
     spec.runtimeCommandDoesNotLoadCncf()
     spec.latestRuntimeIsConcrete()
     spec.noRuntimeLibraryDependencies()
@@ -353,10 +358,80 @@ final class CncfLauncherSpec {
     assert(!invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")))
   }
 
-  def devCheckReportsMissingClasspath(): Unit = _with_temp_paths { paths =>
+  def devHelpExplainsResolutionModel(): Unit = {
+    val help = CncfCommandParser.helpText
+    assert(help.contains("Development resolution:"))
+    assert(help.contains("starts a local development project"))
+    assert(help.contains("repositoryLookup=disabled"))
+    assert(help.contains("--component-dev-dir <dir> is a dependency component local override"))
+    assert(help.contains("textus server <artifact> is the CAR/SAR artifact launcher"))
+  }
+
+  def devCheckReportsMainTargetAndDependencyResolution(): Unit = _with_temp_paths { paths =>
     val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
-    val code = launcher.run(Vector("dev", "check"))
+    val (code, output) = _capture_stdout {
+      launcher.run(Vector("dev", "check"))
+    }
+    _assert_equals(code, 0)
+    assert(output.contains("main-target source=local-project"))
+    assert(output.contains("main-target-repository-lookup disabled in dev mode"))
+    assert(output.contains("dependency-components local dev overrides"))
+  }
+
+  def devCheckTreatsMissingMainTargetClasspathAsWarning(): Unit = _with_temp_paths { paths =>
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    val (code, output) = _capture_stdout {
+      launcher.run(Vector("dev", "check"))
+    }
+    _assert_equals(code, 0)
+    assert(output.contains("WARN"))
+    assert(output.contains("runtime-classpath"))
+    assert(output.contains("dev server will run cncf dev classpath automatically"))
+  }
+
+  def devCheckTreatsMissingDependencyClasspathAsError(): Unit = _with_temp_paths { paths =>
+    Files.createDirectories(paths.cwd.getParent.resolve("account"))
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    val (code, output) = _capture_stdout {
+      launcher.run(Vector("dev", "check", "--component-dev-dir", "../account"))
+    }
     _assert_equals(code, 2)
+    assert(output.contains("ERROR"))
+    assert(output.contains("dependency-component-dev-dir"))
+    assert(output.contains("run cncf dev classpath --project"))
+  }
+
+  def devServerAutoGeneratesMainTargetClasspath(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    val exporter = FakeClasspathExporter.success(classdir.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker, exporter)
+
+    val code = launcher.run(Vector("dev", "server"))
+
+    _assert_equals(code, 0)
+    _assert_equals(exporter.projects, Vector(paths.cwd))
+    assert(Files.isRegularFile(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")))
+    assert(invoker.lastClasspath.contains(classdir))
+    assert(invoker.lastArgs.contains("--component-dev-dir"))
+    assert(invoker.lastArgs.contains(paths.cwd.toString))
+  }
+
+  def devServerReportsMainTargetClasspathExportFailure(): Unit = _with_temp_paths { paths =>
+    val exporter = FakeClasspathExporter.failure("sbt failed")
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), exporter)
+    val failed =
+      try {
+        launcher.run(Vector("dev", "server"))
+        false
+      } catch {
+        case e: CncfException =>
+          e.getMessage.contains("failed to prepare main target runtime classpath") &&
+            e.getMessage.contains("run cncf dev classpath --project") &&
+            e.getMessage.contains("sbt failed")
+      }
+    assert(failed)
   }
 
   def runtimeCommandDoesNotLoadCncf(): Unit = _with_temp_paths { paths =>
@@ -458,6 +533,28 @@ final class FakeResolver extends CncfRuntimeResolver {
 
 object FakeResolver {
   def apply(): FakeResolver = new FakeResolver()
+}
+
+final class FakeClasspathExporter(
+  response: Either[CncfException, String]
+) extends RuntimeClasspathExporter {
+  var projects: Vector[Path] = Vector.empty
+
+  def exportRuntimeClasspath(project: Path): String = {
+    projects :+= project
+    response match {
+      case Right(value) => value
+      case Left(error) => throw error
+    }
+  }
+}
+
+object FakeClasspathExporter {
+  def success(value: String): FakeClasspathExporter =
+    new FakeClasspathExporter(Right(value))
+
+  def failure(message: String): FakeClasspathExporter =
+    new FakeClasspathExporter(Left(CncfException(message)))
 }
 
 final class FakeInvoker extends CncfInvoker {

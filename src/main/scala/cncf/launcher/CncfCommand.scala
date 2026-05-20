@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 18, 2026
+ * @version May. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -322,6 +322,17 @@ object CncfCommandParser {
       |  --runtime <version> overrides .cncf/version and ~/.cncf/version.
       |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
       |  Runtime args before server/client/command are forwarded to CncfMain.
+      |
+      |Development resolution:
+      |  cncf dev server starts a local development project, not a CAR/SAR artifact from a repository.
+      |  --project <dir> selects the main target; without it, the current directory is the main target.
+      |  The main target is repositoryLookup=disabled in dev mode and uses target/cncf.d/runtime-classpath.txt.
+      |  Missing or empty main target classpath is generated automatically; run cncf dev classpath --project <dir> to prepare it manually.
+      |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.
+      |  Dependency components without local overrides are resolved by CNCF component repositories at runtime.
+      |  textus server <artifact> is the CAR/SAR artifact launcher for repository-based application startup.
+      |
+      |Project activation:
       |  --project-activation controls how --project becomes a runtime component source.
       |  --project-activation auto uses component.d artifacts, suppresses project activation when explicit runtime source args are present, otherwise uses component-dev-dir.
       |  --no-project-classpath invokes packaged CAR/SAR artifacts without current project classes.
