@@ -7,7 +7,7 @@ import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version May. 20, 2026
+ * @version May. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
@@ -16,6 +16,7 @@ final case class DevContext(
   componentDevDirs: Vector[Path],
   componentDirs: Vector[Path],
   runtimeVersion: String,
+  runtimeRequirements: Vector[RuntimeRequirement],
   runtimeDevDir: Option[Path],
   runtimeArgs: Vector[String],
   useProjectClasspath: Boolean,
@@ -76,12 +77,16 @@ final class DevSupport(
     val componentdirs = projectcomponentdirs
       .map(_.toAbsolutePath.normalize)
       .distinct
+    val runtimerequirements =
+      (_runtime_requirement(project, "main-target") ++
+        devdirs.filterNot(_ == project).flatMap(dir => _runtime_requirement(dir, s"dependency-component:$dir"))).filterNot(_.isEmpty).toVector
     DevContext(
       project = project,
       port = options.port.orElse(config.devPort).getOrElse(LauncherConfig.DEFAULT_DEV_PORT),
       componentDevDirs = devdirs,
       componentDirs = componentdirs,
       runtimeVersion = store.current(options.runtimeVersion, config),
+      runtimeRequirements = runtimerequirements,
       runtimeDevDir = _resolve_runtime_dev_dir(project, options, config),
       runtimeArgs = options.runtimeArgs,
       useProjectClasspath = options.useProjectClasspath,
@@ -117,6 +122,11 @@ final class DevSupport(
     val dependencyresolution = Vector(
       DevCheckItem.ok("dependency-components", "local dev overrides from --component-dev-dir/.cncf config; otherwise resolved by CNCF component repositories")
     )
+    val runtimerequirements =
+      if (context.runtimeRequirements.isEmpty)
+        Vector(DevCheckItem.ok("runtime-requirements", "none"))
+      else
+        context.runtimeRequirements.map(r => DevCheckItem.ok("runtime-requirement", _render_requirement(r)))
     val dependencydevdirs = context.componentDevDirs.filterNot(_ == context.project)
     val devdirs = dependencydevdirs.map { dir =>
       val file = DevSupport.runtimeClasspathFile(dir)
@@ -135,7 +145,7 @@ final class DevSupport(
       DevCheckItem.ok("project", context.project.toString),
       DevCheckItem.ok("runtime", context.runtimeLabel),
       DevCheckItem.ok("port", context.port)
-    ) ++ target ++ dependencyresolution ++ runtimedevdir ++ classpath ++ descriptors ++ webroots ++ componentdirs ++ devdirs
+    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ classpath ++ descriptors ++ webroots ++ componentdirs ++ devdirs
   }
 
   def cncfArgs(
@@ -298,6 +308,46 @@ final class DevSupport(
       Vector(DevCheckItem.warning("runtime-dev-dir", s"${dir} missing ${file}; dev invocation will run sbt export Runtime / fullClasspath"))
     }
   }
+
+  private def _runtime_requirement(
+    project: Path,
+    source: String
+  ): Option[RuntimeRequirement] = {
+    val file = project.resolve("project.yaml")
+    if (!Files.isRegularFile(file)) {
+      None
+    } else {
+      val values = SimpleYaml.parse(Files.readString(file, StandardCharsets.UTF_8))
+      val requirement = RuntimeRequirement(
+        minimum = _first(values, "packaging.car.runtime.cncf.minimum"),
+        maximum = _first(values, "packaging.car.runtime.cncf.maximum"),
+        excluded = _list(values, "packaging.car.runtime.cncf.excluded"),
+        tested = _list(values, "packaging.car.runtime.cncf.tested"),
+        source = source
+      )
+      Option.when(!requirement.isEmpty)(requirement)
+    }
+  }
+
+  private def _first(values: Map[String, Vector[String]], key: String): Option[String] =
+    values.getOrElse(key, Vector.empty).headOption.map(_.trim).filter(_.nonEmpty)
+
+  private def _list(values: Map[String, Vector[String]], key: String): Vector[String] =
+    values.getOrElse(key, Vector.empty).flatMap { value =>
+      val clean = value.trim
+      if (clean.isEmpty || clean == "[]")
+        Vector.empty
+      else if (clean.startsWith("[") && clean.endsWith("]"))
+        clean.stripPrefix("[").stripSuffix("]").split(",").toVector.map(_unquote).map(_.trim).filter(_.nonEmpty)
+      else
+        Vector(_unquote(clean))
+    }
+
+  private def _unquote(value: String): String =
+    value.stripPrefix("\"").stripSuffix("\"").stripPrefix("'").stripSuffix("'")
+
+  private def _render_requirement(requirement: RuntimeRequirement): String =
+    s"${requirement.source} minimum=${requirement.minimum.getOrElse("-")} maximum=${requirement.maximum.getOrElse("-")} excluded=${requirement.excluded.mkString("[", ",", "]")} tested=${requirement.tested.mkString("[", ",", "]")}"
 
   private def _check_descriptors(project: Path): Vector[DevCheckItem] = {
     val dirs = Vector(project.resolve("car.d"), project.resolve("src").resolve("main").resolve("car"))

@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 20, 2026
+ * @version May. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -15,6 +15,8 @@ object CncfCommand {
   final case class DevOptions(
     project: Option[String] = None,
     runtimeVersion: Option[String] = None,
+    runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
+    runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
     runtimeDevDir: Option[String] = None,
     port: Option[String] = None,
     componentDevDirs: Vector[String] = Vector.empty,
@@ -68,10 +70,10 @@ object CncfCommandParser {
     } else if (args.isEmpty || args.contains("--help") || args.contains("-h")) {
       CncfCommand.Help
     } else {
-      val (runtimeversion, runtimedevdir, rest) = _take_global_runtime_options(args)
+      val (runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir, rest) = _take_global_runtime_options(args)
       rest.headOption match {
         case Some("dev") =>
-          _parse_dev(rest.tail, runtimeversion, runtimedevdir)
+          _parse_dev(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
         case Some("runtime") =>
           _parse_runtime(rest.tail)
         case Some(other) =>
@@ -82,9 +84,11 @@ object CncfCommandParser {
     }
   }
 
-  private def _take_global_runtime_options(args: Vector[String]): (Option[String], Option[String], Vector[String]) = {
+  private def _take_global_runtime_options(args: Vector[String]): (Option[String], Option[RuntimeSelectionPolicy], Option[RuntimeNoCompatiblePolicy], Option[String], Vector[String]) = {
     val out = Vector.newBuilder[String]
     var runtime: Option[String] = None
+    var selectionpolicy: Option[RuntimeSelectionPolicy] = None
+    var nocompatiblepolicy: Option[RuntimeNoCompatiblePolicy] = None
     var runtimedevdir: Option[String] = None
     var i = 0
     while (i < args.length) {
@@ -96,6 +100,22 @@ object CncfCommandParser {
           i += 2
         case x if x.startsWith("--runtime=") =>
           runtime = Some(x.stripPrefix("--runtime="))
+          i += 1
+        case "--runtime-selection" =>
+          if (i + 1 >= args.length)
+            throw CncfException("--runtime-selection requires a value")
+          selectionpolicy = Some(RuntimeSelectionPolicy.parse(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--runtime-selection=") =>
+          selectionpolicy = Some(RuntimeSelectionPolicy.parse(x.stripPrefix("--runtime-selection=")))
+          i += 1
+        case "--runtime-no-compatible" =>
+          if (i + 1 >= args.length)
+            throw CncfException("--runtime-no-compatible requires a value")
+          nocompatiblepolicy = Some(RuntimeNoCompatiblePolicy.parse(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--runtime-no-compatible=") =>
+          nocompatiblepolicy = Some(RuntimeNoCompatiblePolicy.parse(x.stripPrefix("--runtime-no-compatible=")))
           i += 1
         case "--runtime-dev-dir" | "--cncf-dev-dir" =>
           if (i + 1 >= args.length)
@@ -113,19 +133,21 @@ object CncfCommandParser {
           i += 1
       }
     }
-    (runtime, runtimedevdir, out.result())
+    (runtime, selectionpolicy, nocompatiblepolicy, runtimedevdir, out.result())
   }
 
   private def _parse_dev(
     args: Vector[String],
     runtimeversion: Option[String],
+    selectionpolicy: Option[RuntimeSelectionPolicy],
+    nocompatiblepolicy: Option[RuntimeNoCompatiblePolicy],
     runtimedevdir: Option[String]
   ): CncfCommand.Dev = {
     if (args.isEmpty)
       throw CncfException("cncf dev requires a subcommand")
     val subcommand = args.head
     val (pre, passthrough) = args.tail.span(_ != "--")
-    val (options, rest) = _parse_dev_options(pre, runtimeversion, runtimedevdir)
+    val (options, rest) = _parse_dev_options(pre, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
     val effectiveoptions =
       if (passthrough.isEmpty) options
       else options.copy(passthrough = passthrough.tail)
@@ -154,11 +176,15 @@ object CncfCommandParser {
   private def _parse_dev_options(
     args: Vector[String],
     runtimeversion: Option[String],
+    globalselectionpolicy: Option[RuntimeSelectionPolicy],
+    nocompatiblepolicy: Option[RuntimeNoCompatiblePolicy],
     globalruntimedevdir: Option[String]
   ): (CncfCommand.DevOptions, Vector[String]) = {
     val rest = Vector.newBuilder[String]
     var project: Option[String] = None
     var runtimedevdir = globalruntimedevdir
+    var selectionpolicy = globalselectionpolicy
+    var runtimepolicy = nocompatiblepolicy
     var port: Option[String] = None
     var componentdevdirs = Vector.empty[String]
     var runtimeargs = Vector.empty[String]
@@ -181,6 +207,20 @@ object CncfCommandParser {
           i += 2
         case x if x.startsWith("--runtime-dev-dir=") =>
           runtimedevdir = Some(x.stripPrefix("--runtime-dev-dir="))
+          i += 1
+        case "--runtime-selection" =>
+          if (i + 1 >= args.length) throw CncfException("--runtime-selection requires a value")
+          selectionpolicy = Some(RuntimeSelectionPolicy.parse(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--runtime-selection=") =>
+          selectionpolicy = Some(RuntimeSelectionPolicy.parse(x.stripPrefix("--runtime-selection=")))
+          i += 1
+        case "--runtime-no-compatible" =>
+          if (i + 1 >= args.length) throw CncfException("--runtime-no-compatible requires a value")
+          runtimepolicy = Some(RuntimeNoCompatiblePolicy.parse(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--runtime-no-compatible=") =>
+          runtimepolicy = Some(RuntimeNoCompatiblePolicy.parse(x.stripPrefix("--runtime-no-compatible=")))
           i += 1
         case x if x.startsWith("--cncf-dev-dir=") =>
           runtimedevdir = Some(x.stripPrefix("--cncf-dev-dir="))
@@ -233,6 +273,8 @@ object CncfCommandParser {
     (CncfCommand.DevOptions(
       project = project,
       runtimeVersion = runtimeversion,
+      runtimeSelectionPolicy = selectionpolicy,
+      runtimeNoCompatiblePolicy = runtimepolicy,
       runtimeDevDir = runtimedevdir,
       port = port,
       componentDevDirs = componentdevdirs,
@@ -320,6 +362,9 @@ object CncfCommandParser {
       |
       |Runtime:
       |  --runtime <version> overrides .cncf/version and ~/.cncf/version.
+      |  Without --runtime, project/component runtime.cncf requirements use current-compatible selection by default.
+      |  --runtime-selection=current-compatible|tested-latest|latest-compatible|newest-compatible selects the compatible runtime preference.
+      |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
       |  Runtime args before server/client/command are forwarded to CncfMain.
       |

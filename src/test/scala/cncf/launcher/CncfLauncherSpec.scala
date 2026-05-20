@@ -4,7 +4,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 20, 2026
+ * @version May. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -34,6 +34,14 @@ object CncfLauncherSpec {
     spec.devCheckTreatsMissingDependencyClasspathAsError()
     spec.devServerAutoGeneratesMainTargetClasspath()
     spec.devServerReportsMainTargetClasspathExportFailure()
+    spec.devUsesCurrentCompatibleRuntimeByDefault()
+    spec.devCanSelectLatestTestedRuntime()
+    spec.devCanSelectLatestCompatibleRuntime()
+    spec.devCanSelectNewestCompatibleRuntime()
+    spec.devParsesInlineRuntimeRequirementLists()
+    spec.devSelectsCommonRuntimeAcrossProjectAndDependency()
+    spec.devRuntimeConflictDefaultsToError()
+    spec.devRuntimeConflictCanUseNewestPolicy()
     spec.runtimeCommandDoesNotLoadCncf()
     spec.latestRuntimeIsConcrete()
     spec.noRuntimeLibraryDependencies()
@@ -178,6 +186,7 @@ final class CncfLauncherSpec {
       "--repository-dir", "repository.d"
     )).asInstanceOf[CncfCommand.Dev.Server]
     _assert_equals(server.options.runtimeVersion, Some("0.4.7"))
+    _assert_equals(server.options.runtimeSelectionPolicy, None)
     _assert_equals(server.options.project, Some("/tmp/blog"))
     _assert_equals(server.options.runtimeDevDir, Some("/tmp/cncf"))
     _assert_equals(server.options.port, Some("19599"))
@@ -189,6 +198,13 @@ final class CncfLauncherSpec {
       .asInstanceOf[CncfCommand.Dev.Command]
     _assert_equals(command.operation, "blog.post.search")
     _assert_equals(command.args, Vector("limit=10"))
+
+    val selection = CncfCommandParser.parse(Vector("--runtime-selection=tested-latest", "dev", "server"))
+      .asInstanceOf[CncfCommand.Dev.Server]
+    _assert_equals(selection.options.runtimeSelectionPolicy, Some(RuntimeSelectionPolicy.TestedLatest))
+    val latestselection = CncfCommandParser.parse(Vector("--runtime-selection=latest", "dev", "server"))
+      .asInstanceOf[CncfCommand.Dev.Server]
+    _assert_equals(latestselection.options.runtimeSelectionPolicy, Some(RuntimeSelectionPolicy.LatestCompatible))
 
     val emulation = CncfCommandParser.parse(Vector("dev", "server-emulation", "blog.component.search"))
       .asInstanceOf[CncfCommand.Dev.ServerEmulation]
@@ -434,6 +450,177 @@ final class CncfLauncherSpec {
     assert(failed)
   }
 
+  def devUsesCurrentCompatibleRuntimeByDefault(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0", "0.3.0-SNAPSHOT")))
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
+  }
+
+  def devCanSelectLatestTestedRuntime(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0", "0.3.0-SNAPSHOT")))
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("--runtime-selection=tested-latest", "dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
+  }
+
+  def devCanSelectLatestCompatibleRuntime(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0")))
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("--runtime-selection=latest", "dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
+  }
+
+  def devCanSelectNewestCompatibleRuntime(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0")))
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("--runtime-selection=newest", "dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.3.0-SNAPSHOT"))
+  }
+
+  def devParsesInlineRuntimeRequirementLists(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"),
+      """packaging:
+        |  kind: car
+        |  car:
+        |    runtime:
+        |      cncf:
+        |        minimum: 0.2.0
+        |        excluded: []
+        |        tested: [0.3.0-SNAPSHOT]
+        |""".stripMargin)
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("--runtime-selection=tested-latest", "dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.3.0-SNAPSHOT"))
+  }
+
+  def devSelectsCommonRuntimeAcrossProjectAndDependency(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    val account = paths.cwd.getParent.resolve("account")
+    Files.createDirectories(classdir)
+    Files.createDirectories(account.resolve("target").resolve("classes"))
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(account.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0", "0.3.0-SNAPSHOT")))
+    _write(account.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0")))
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |dev:
+         |  componentDevDirs:
+         |    - ../account
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
+  }
+
+  def devRuntimeConflictDefaultsToError(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("9.0.0", Vector("9.0.0")))
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |""".stripMargin)
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    val failed =
+      try {
+        launcher.run(Vector("dev", "server"))
+        false
+      } catch {
+        case e: CncfException => e.getMessage.contains("no compatible CNCF runtime version")
+      }
+    assert(failed)
+  }
+
+  def devRuntimeConflictCanUseNewestPolicy(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("9.0.0", Vector("9.0.0")))
+    _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("--runtime-no-compatible=newest", "dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.3.0-SNAPSHOT"))
+  }
+
   def runtimeCommandDoesNotLoadCncf(): Unit = _with_temp_paths { paths =>
     _write(paths.cwd.resolve(".cncf").resolve("config.yaml"), "runtime:\n  version: 0.5.0\n")
     val resolver = FakeResolver()
@@ -515,6 +702,21 @@ final class CncfLauncherSpec {
       |    module: org.goldenport:goldenport-cncf_3:0.3.0-SNAPSHOT
       |    publishedAt: 2026-05-17T02:00:00Z
       |""".stripMargin
+
+  private def _project_yaml(
+    minimum: String,
+    tested: Vector[String]
+  ): String =
+    s"""packaging:
+       |  kind: car
+       |  car:
+       |    runtime:
+       |      cncf:
+       |        minimum: $minimum
+       |        excluded: []
+       |        tested:
+       |${tested.map(v => s"          - $v").mkString("\n")}
+       |""".stripMargin
 }
 
 final class FakeResolver extends CncfRuntimeResolver {

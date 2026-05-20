@@ -4,7 +4,7 @@ import java.nio.file.Files
 
 /*
  * @since   May. 17, 2026
- * @version May. 20, 2026
+ * @version May. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -122,7 +122,20 @@ final class CncfLauncher(
     val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
     val devsupport = DevSupport(effectivepaths, classpathexporter)
     val effectiveoptions = command.options.copy(project = None)
-    val context = devsupport.context(effectiveoptions, effectiveconfig, store)
+    val rawcontext = devsupport.context(effectiveoptions, effectiveconfig, store)
+    val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
+      orElse(effectiveconfig.runtimeSelectionPolicy).
+      getOrElse(RuntimeSelectionPolicy.CurrentCompatible)
+    val policy = effectiveoptions.runtimeNoCompatiblePolicy.orElse(effectiveconfig.runtimeNoCompatiblePolicy).getOrElse(RuntimeNoCompatiblePolicy.Error)
+    val runtimeversion = RuntimeVersionSelection.select(
+      requested = effectiveoptions.runtimeVersion,
+      stored = store.current(None, effectiveconfig),
+      requirements = rawcontext.runtimeRequirements,
+      catalog = catalog,
+      selectionPolicy = selectionpolicy,
+      policy = policy
+    )
+    val context = rawcontext.copy(runtimeVersion = runtimeversion)
     command match {
       case CncfCommand.Dev.Classpath(_) =>
         val file = devsupport.writeRuntimeClasspath(context)
