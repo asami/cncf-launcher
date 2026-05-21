@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 21, 2026
+ * @version May. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -43,6 +43,8 @@ object CncfCommand {
     case object RemoteList extends Runtime
     case object Refresh extends Runtime
     case object CatalogShow extends Runtime
+    final case class Descriptor(format: String) extends Runtime
+    final case class BaseProvided(format: String) extends Runtime
     case object Channels extends Runtime
     final case class Install(version: String) extends Runtime
     final case class Use(version: String, target: RuntimeUseTarget) extends Runtime
@@ -321,6 +323,14 @@ object CncfCommandParser {
       case Vector("remote", "list") => CncfCommand.Runtime.RemoteList
       case Vector("refresh") => CncfCommand.Runtime.Refresh
       case Vector("catalog", "show") => CncfCommand.Runtime.CatalogShow
+      case Vector("descriptor") => CncfCommand.Runtime.Descriptor("yaml")
+      case Vector("descriptor", "--format", format) => CncfCommand.Runtime.Descriptor(format)
+      case Vector("descriptor", format) if format.startsWith("--format=") =>
+        CncfCommand.Runtime.Descriptor(format.stripPrefix("--format="))
+      case Vector("base-provided") => CncfCommand.Runtime.BaseProvided("yaml")
+      case Vector("base-provided", "--format", format) => CncfCommand.Runtime.BaseProvided(format)
+      case Vector("base-provided", format) if format.startsWith("--format=") =>
+        CncfCommand.Runtime.BaseProvided(format.stripPrefix("--format="))
       case Vector("channels") => CncfCommand.Runtime.Channels
       case Vector("install", version) => CncfCommand.Runtime.Install(version)
       case Vector("use", version) =>
@@ -352,6 +362,8 @@ object CncfCommandParser {
       |  cncf runtime remote list
       |  cncf runtime refresh
       |  cncf runtime catalog show
+      |  cncf runtime descriptor [--format yaml]
+      |  cncf runtime base-provided [--format yaml]
       |  cncf runtime channels
       |  cncf runtime install <version>
       |  cncf runtime use <version>

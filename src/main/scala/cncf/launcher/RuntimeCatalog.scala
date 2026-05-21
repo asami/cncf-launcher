@@ -7,7 +7,7 @@ import scala.util.Using
 
 /*
  * @since   May. 17, 2026
- * @version May. 21, 2026
+ * @version May. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class RuntimeCatalog(
@@ -20,7 +20,8 @@ final case class RuntimeCatalog(
   mavenRepositories: Vector[String],
   carRepositories: Vector[String],
   sarRepositories: Vector[String],
-  coursierRepositories: Vector[String]
+  coursierRepositories: Vector[String],
+  baseProvided: Vector[String]
 ) {
   def resolve(selector: String): RuntimeCatalogVersion = {
     val version =
@@ -79,9 +80,22 @@ final case class RuntimeCatalog(
       _render_list("coursierRepositories", coursierRepositories)
     )
     val body =
-      "versions:" +: versions.flatMap(_.renderLines)
+      _render_list("baseProvided", baseProvided) +: ("versions:" +: versions.flatMap(_.renderLines))
     (head ++ repos ++ body).mkString("\n")
   }
+
+  def renderRuntimeDescriptor(version: RuntimeCatalogVersion): String =
+    Vector(
+      s"schemaVersion: 1",
+      s"runtime: cncf",
+      s"version: ${version.version}",
+      "scalaBinaryVersion: \"" + version.scalaBinaryVersion.getOrElse("3") + "\"",
+      s"module: ${version.moduleCoordinate}",
+      _render_list("baseProvided", baseProvided)
+    ).mkString("\n")
+
+  def renderBaseProvided: String =
+    _render_list("baseProvided", baseProvided)
 
   private def _render_list(name: String, values: Vector[String]): String =
     if (values.isEmpty)
@@ -129,6 +143,21 @@ final case class RuntimeCatalogVersion(
 }
 
 object RuntimeCatalog {
+  val empty: RuntimeCatalog =
+    RuntimeCatalog(
+      schemaVersion = "1",
+      generatedAt = None,
+      recommended = None,
+      latestStable = None,
+      latestSnapshot = None,
+      versions = Vector.empty,
+      mavenRepositories = Vector.empty,
+      carRepositories = Vector.empty,
+      sarRepositories = Vector.empty,
+      coursierRepositories = Vector.empty,
+      baseProvided = Vector.empty
+    )
+
   def parse(text: String): RuntimeCatalog = {
     var root = Map.empty[String, String]
     var lists = Map.empty[String, Vector[String]]
@@ -187,7 +216,8 @@ object RuntimeCatalog {
       mavenRepositories = lists.getOrElse("mavenRepositories", Vector.empty),
       carRepositories = lists.getOrElse("carRepositories", Vector.empty),
       sarRepositories = lists.getOrElse("sarRepositories", Vector.empty),
-      coursierRepositories = lists.getOrElse("coursierRepositories", Vector.empty)
+      coursierRepositories = lists.getOrElse("coursierRepositories", Vector.empty),
+      baseProvided = lists.getOrElse("baseProvided", Vector.empty)
     )
   }
 

@@ -1,10 +1,13 @@
 package cncf.launcher
 
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.util.zip.ZipFile
+import scala.util.Try
 
 /*
  * @since   May. 17, 2026
- * @version May. 21, 2026
+ * @version May. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -69,6 +72,14 @@ final class CncfLauncher(
           .getOrElse(throw CncfException("failed to load Cncf runtime catalog"))
         println(catalog.render)
         0
+      case CncfCommand.Runtime.Descriptor(format) =>
+        _validate_yaml_format(format)
+        println(_runtime_descriptor(store, config, catalogstore.loadOrRefresh(config)))
+        0
+      case CncfCommand.Runtime.BaseProvided(format) =>
+        _validate_yaml_format(format)
+        println(RuntimeCatalog.parse(_runtime_descriptor(store, config, catalogstore.loadOrRefresh(config))).renderBaseProvided)
+        0
       case CncfCommand.Runtime.Channels =>
         val catalog = catalogstore.loadOrRefresh(config)
           .getOrElse(throw CncfException("failed to load Cncf runtime catalog"))
@@ -99,6 +110,71 @@ final class CncfLauncher(
         0
     }
   }
+
+  private def _current_runtime_catalog_version(
+    store: RuntimeVersionStore,
+    config: LauncherConfig,
+    catalog: RuntimeCatalog
+  ): RuntimeCatalogVersion =
+    catalog.resolve(store.current(None, config))
+
+  private def _validate_yaml_format(format: String): Unit =
+    if (format != "yaml")
+      throw CncfException(s"unsupported runtime descriptor format: $format")
+
+  private def _runtime_descriptor(
+    store: RuntimeVersionStore,
+    config: LauncherConfig,
+    catalog: Option[RuntimeCatalog]
+  ): String = {
+    val selector = store.current(None, config)
+    val version = catalog.map(_.resolve(selector)).getOrElse(_runtime_catalog_version_without_catalog(selector, config))
+    val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
+    val descriptor =
+      Try(runtimeresolver.resolve(version.version, effectiveconfig, paths)).toOption.
+        flatMap(_runtime_descriptor_from_classpath)
+    descriptor.getOrElse {
+      catalog.map(_.renderRuntimeDescriptor(version)).
+        getOrElse(RuntimeCatalog.empty.renderRuntimeDescriptor(version))
+    }
+  }
+
+  private def _runtime_catalog_version_without_catalog(
+    selector: String,
+    config: LauncherConfig
+  ): RuntimeCatalogVersion =
+    RuntimeCatalogVersion(
+      version = runtimeresolver.resolveVersion(selector, config, paths),
+      channel = None,
+      status = Some("active"),
+      scalaBinaryVersion = Some("3"),
+      module = None,
+      publishedAt = None,
+      checksumUrl = None,
+      metadataUrl = None
+    )
+
+  private def _runtime_descriptor_from_classpath(
+    classpath: Vector[java.nio.file.Path]
+  ): Option[String] =
+    classpath.iterator.flatMap(_runtime_descriptor_from_jar).nextOption()
+
+  private def _runtime_descriptor_from_jar(path: java.nio.file.Path): Option[String] =
+    if (Files.isRegularFile(path) && path.getFileName.toString.endsWith(".jar"))
+      Try {
+        val zip = new ZipFile(path.toFile)
+        try {
+          Option(zip.getEntry("META-INF/cncf/runtime.yaml")).map { entry =>
+            val in = zip.getInputStream(entry)
+            try new String(in.readAllBytes(), StandardCharsets.UTF_8)
+            finally in.close()
+          }
+        } finally {
+          zip.close()
+        }
+      }.toOption.flatten
+    else
+      None
 
   private def _resolve_runtime_use_target(
     target: CncfCommand.RuntimeUseTarget

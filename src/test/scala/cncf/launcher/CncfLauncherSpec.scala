@@ -1,10 +1,12 @@
 package cncf.launcher
 
+import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
+import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version May. 21, 2026
+ * @version May. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -18,6 +20,8 @@ object CncfLauncherSpec {
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
     spec.runtimeCatalogParseAndSelectorResolution()
     spec.runtimeCatalogCommands()
+    spec.runtimeDescriptorCommands()
+    spec.runtimeDescriptorPrefersRuntimeJarDescriptor()
     spec.devParser()
     spec.devServerRewritesToCncfArgs()
     spec.devServerUsesRuntimeDevelopmentDirectory()
@@ -146,6 +150,7 @@ final class CncfLauncherSpec {
     _assert_equals(catalog.resolve("latest-stable").version, "0.2.0")
     _assert_equals(catalog.resolve("latest-snapshot").version, "0.3.0-SNAPSHOT")
     _assert_equals(catalog.resolve("newest").version, "0.3.0-SNAPSHOT")
+    _assert_equals(catalog.baseProvided, Vector("org.goldenport:goldenport-cncf_3", "org.typelevel:cats-core_3"))
     val disabled =
       try {
         catalog.resolve("0.1.0")
@@ -173,6 +178,68 @@ final class CncfLauncherSpec {
     launcher.run(Vector("runtime", "use", "recommended", "--project"))
     _assert_equals(Files.readString(paths.projectVersion).trim, "recommended")
     launcher.run(Vector("runtime", "current"))
+  }
+
+  def runtimeDescriptorCommands(): Unit = _with_temp_paths { paths =>
+    val catalogfile = paths.cwd.resolve("runtime-catalog.yaml")
+    _write(catalogfile, _catalog_text)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: $catalogfile
+         |""".stripMargin)
+    val launcher = new CncfLauncher(paths, CoursierCncfRuntimeResolver("false"), FakeInvoker())
+    val (_, descriptor) = _capture_stdout {
+      launcher.run(Vector("runtime", "descriptor", "--format", "yaml"))
+    }
+    assert(descriptor.contains("runtime: cncf"))
+    assert(descriptor.contains("version: 0.2.0"))
+    assert(descriptor.contains("module: org.goldenport:goldenport-cncf_3:0.2.0"))
+    assert(descriptor.contains("baseProvided:"))
+    assert(descriptor.contains("org.typelevel:cats-core_3"))
+
+    val (_, baseprovided) = _capture_stdout {
+      launcher.run(Vector("runtime", "base-provided", "--format=yaml"))
+    }
+    assert(baseprovided.contains("baseProvided:"))
+    assert(baseprovided.contains("org.goldenport:goldenport-cncf_3"))
+  }
+
+  def runtimeDescriptorPrefersRuntimeJarDescriptor(): Unit = _with_temp_paths { paths =>
+    val catalogfile = paths.cwd.resolve("runtime-catalog.yaml")
+    val jar = paths.cwd.resolve("goldenport-cncf.jar")
+    _write(catalogfile, _catalog_text)
+    _write_zip(
+      jar,
+      "META-INF/cncf/runtime.yaml",
+      """schemaVersion: 1
+        |runtime: cncf
+        |version: 0.2.0
+        |scalaBinaryVersion: "3"
+        |module: org.goldenport:goldenport-cncf_3:0.2.0
+        |baseProvided:
+        |  - org.goldenport:goldenport-cncf_3
+        |  - org.typelevel:spire_3
+        |""".stripMargin
+    )
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: $catalogfile
+         |""".stripMargin)
+    val launcher = new CncfLauncher(paths, FakeResolver(Some(Vector(jar))), FakeInvoker())
+
+    val (_, descriptor) = _capture_stdout {
+      launcher.run(Vector("runtime", "descriptor"))
+    }
+    val (_, baseprovided) = _capture_stdout {
+      launcher.run(Vector("runtime", "base-provided"))
+    }
+
+    assert(descriptor.contains("org.typelevel:spire_3"))
+    assert(!descriptor.contains("org.typelevel:cats-core_3"))
+    assert(baseprovided.contains("org.typelevel:spire_3"))
+    assert(!baseprovided.contains("org.typelevel:cats-core_3"))
   }
 
   def devParser(): Unit = {
@@ -668,6 +735,23 @@ final class CncfLauncherSpec {
     Files.writeString(path, value)
   }
 
+  private def _write_zip(
+    path: Path,
+    entry: String,
+    value: String
+  ): Path = {
+    Files.createDirectories(path.getParent)
+    val out = new ZipOutputStream(Files.newOutputStream(path))
+    try {
+      out.putNextEntry(new ZipEntry(entry))
+      out.write(value.getBytes(StandardCharsets.UTF_8))
+      out.closeEntry()
+    } finally {
+      out.close()
+    }
+    path
+  }
+
   private def _assert_equals[A](actual: A, expected: A): Unit =
     assert(actual == expected, s"expected=$expected actual=$actual")
 
@@ -685,6 +769,9 @@ final class CncfLauncherSpec {
       |  - https://repo.example/sar
       |coursierRepositories:
       |  - https://repo.example/coursier
+      |baseProvided:
+      |  - org.goldenport:goldenport-cncf_3
+      |  - org.typelevel:cats-core_3
       |versions:
       |  - version: 0.1.0
       |    channel: stable
@@ -721,7 +808,9 @@ final class CncfLauncherSpec {
        |""".stripMargin
 }
 
-final class FakeResolver extends CncfRuntimeResolver {
+final class FakeResolver(
+  classpath: Option[Vector[Path]] = None
+) extends CncfRuntimeResolver {
   var resolvedVersions: Vector[String] = Vector.empty
   var resolvedClasspaths: Vector[String] = Vector.empty
   override def resolveVersion(version: String, config: LauncherConfig, paths: LauncherPaths): String = {
@@ -731,12 +820,13 @@ final class FakeResolver extends CncfRuntimeResolver {
   def resolve(version: String, config: LauncherConfig, paths: LauncherPaths): Vector[Path] = {
     val concreteversion = resolveVersion(version, config, paths)
     resolvedClasspaths :+= concreteversion
-    Vector(paths.cwd.resolve(s"fake-cncf-$concreteversion.jar"))
+    classpath.getOrElse(Vector(paths.cwd.resolve(s"fake-cncf-$concreteversion.jar")))
   }
 }
 
 object FakeResolver {
   def apply(): FakeResolver = new FakeResolver()
+  def apply(classpath: Option[Vector[Path]]): FakeResolver = new FakeResolver(classpath)
 }
 
 final class FakeClasspathExporter(
