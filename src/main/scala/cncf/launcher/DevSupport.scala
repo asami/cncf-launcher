@@ -114,6 +114,7 @@ final class DevSupport(
       else Vector(DevCheckItem.ok("runtime-classpath", "project classpath disabled"))
     val descriptors = _check_descriptors(context.project)
     val webapproots = _check_web_app_roots(context.project)
+    val webdescriptorsources = _check_web_descriptor_sources(context.project)
     val webdescriptors = _check_web_descriptors(context.project)
     val runtimedevdir = context.runtimeDevDir.toVector.flatMap(_check_runtime_dev_dir)
     val target = Vector(
@@ -146,7 +147,7 @@ final class DevSupport(
       DevCheckItem.ok("project", context.project.toString),
       DevCheckItem.ok("runtime", context.runtimeLabel),
       DevCheckItem.ok("port", context.port)
-    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ classpath ++ descriptors ++ webapproots ++ webdescriptors ++ componentdirs ++ devdirs
+    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ classpath ++ descriptors ++ webapproots ++ webdescriptorsources ++ webdescriptors ++ componentdirs ++ devdirs
   }
 
   def cncfArgs(
@@ -374,7 +375,28 @@ final class DevSupport(
     if (found.isEmpty)
       Vector(DevCheckItem.ok("web-descriptor", "none"))
     else
-      found.map(dir => DevCheckItem.ok("web-descriptor", s"car-runtime-metadata path=${dir}"))
+      found.map(dir => DevCheckItem.warning("web-descriptor", s"legacy-car-runtime-metadata path=${dir}; prefer src/main/web-inf source metadata"))
+  }
+
+  private def _check_web_descriptor_sources(project: Path): Vector[DevCheckItem] = {
+    val root = project.resolve("src").resolve("main").resolve("web-inf")
+    val files = Vector("web.yaml", "form.yaml", "admin.yaml").map(root.resolve).filter(Files.isRegularFile(_))
+    if (Files.isDirectory(root) || files.nonEmpty)
+      DevCheckItem.ok("web-descriptor-source", s"path=${root} files=${files.map(_.getFileName.toString).mkString("[", ",", "]")}") +:
+        _check_legacy_web_descriptor_sources(project)
+    else
+      DevCheckItem.ok("web-descriptor-source", "none; use src/main/web-inf/web.yaml|form.yaml|admin.yaml") +:
+        _check_legacy_web_descriptor_sources(project)
+  }
+
+  private def _check_legacy_web_descriptor_sources(project: Path): Vector[DevCheckItem] = {
+    val legacy = Vector(
+      project.resolve("src").resolve("main").resolve("web").resolve("WEB-INF").resolve("web.yaml"),
+      project.resolve("src").resolve("main").resolve("web").resolve("WEB-INF").resolve("form.yaml"),
+      project.resolve("src").resolve("main").resolve("web").resolve("WEB-INF").resolve("admin.yaml"),
+      project.resolve("src").resolve("main").resolve("form").resolve("form.yaml")
+    ).filter(Files.isRegularFile(_))
+    legacy.map(path => DevCheckItem.warning("web-descriptor-source", s"legacy descriptor source ignored by new scaffold policy: ${path}"))
   }
 
   private def _classpath_entries(value: String): Vector[Path] =
