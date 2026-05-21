@@ -42,10 +42,14 @@ fullClasspath`. Use `cncf dev classpath --project <dir>` to prepare it manually.
 
 Dependency components are separate from the main target. Use
 `--component-dev-dir <dir>` or `.cncf/config.yaml` `dev.componentDevDirs` for
-dependencies that are also under local development. Dependencies without local
-overrides are resolved by the CNCF runtime from configured component
-repositories. `textus server <artifact>` is the CAR/SAR artifact launcher for
-repository-based application startup.
+source-level debugging of dependencies that are also under local development.
+For the normal dependency-component development loop, run `sbt
+cozyPublishLocalCar` in the dependency component. This publishes the CAR,
+catalog, and metadata into `~/.cncf/repository`, and the `cncf` launcher passes
+that local repository to the runtime before public repositories. Dependencies
+without source overrides are resolved by the CNCF runtime from configured
+component repositories. `textus server <artifact>` is the CAR/SAR artifact
+launcher for repository-based application startup.
 
 Use `--runtime-dev-dir <dir>` or `runtime.devDir` to run against a local CNCF
 runtime checkout instead of a published runtime artifact. This is for CNCF core
@@ -87,6 +91,22 @@ repositories:
   maven:
     - https://www.simplemodeling.org/repository/maven
 ```
+
+The default CAR/SAR repository order is:
+
+1. CLI/config explicit repositories
+2. `~/.cncf/repository/repository/car` and `~/.cncf/repository/repository/sar`
+3. runtime catalog repositories
+4. built-in SimpleModeling.org repositories
+
+`~/.cncf/repository` is local publish state produced by
+`sbt cozyPublishLocalCar` / `sbt cozyPublishLocalSar`. `~/.cncf/cache` is remote
+artifact cache and can be deleted without removing locally published
+development artifacts.
+
+`.cozy/config.yaml` belongs to build/publish operation defaults.
+`.cncf/config.yaml` belongs to runtime lookup and development startup.
+`project.yaml` belongs to artifact metadata and runtime compatibility.
 
 `.textus/config.yaml` remains a CNCF runtime/project configuration file. It is
 not read as launcher configuration.

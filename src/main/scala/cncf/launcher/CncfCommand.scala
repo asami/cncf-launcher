@@ -387,6 +387,9 @@ object CncfCommandParser {
       |  Missing or empty main target classpath is generated automatically; run cncf dev classpath --project <dir> to prepare it manually.
       |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.
       |  Dependency components without local overrides are resolved by CNCF component repositories at runtime.
+      |  The default local component repository is ~/.cncf/repository/repository/car and ~/.cncf/repository/repository/sar.
+      |  Publish dependency components there with sbt cozyPublishLocalCar or sbt cozyPublishLocalSar.
+      |  ~/.cncf/repository is local publish state; ~/.cncf/cache is remote artifact cache.
       |  Web app source lives under src/main/web; descriptor source metadata lives under src/main/web-inf.
       |  src/main/web/WEB-INF is for private Web resources, not generated descriptor source.
       |  textus server <artifact> is the CAR/SAR artifact launcher for repository-based application startup.

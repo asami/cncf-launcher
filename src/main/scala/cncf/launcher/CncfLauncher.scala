@@ -102,6 +102,7 @@ final class CncfLauncher(
         0
       case CncfCommand.Runtime.CacheStatus() =>
         println(s"cncf home: ${paths.cncfHome}")
+        println(s"local repository: ${paths.localRepository}")
         println(s"runtime cache: ${paths.runtimeRoot}")
         println(s"coursier cache: ${paths.coursierCache}")
         0

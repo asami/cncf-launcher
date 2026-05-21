@@ -111,6 +111,8 @@ final class CncfLauncherSpec {
     assert(config.carRepositories.head == "https://project.example/car")
     assert(config.carRepositories(1) == "https://global.example/car")
     assert(config.sarRepositories.head == "https://global.example/sar")
+    assert(config.carRepositories.contains(paths.localCarRepository.toString))
+    assert(config.sarRepositories.contains(paths.localSarRepository.toString))
     assert(config.carRepositories.contains("https://www.simplemodeling.org/repository/car"))
   }
 
@@ -447,6 +449,8 @@ final class CncfLauncherSpec {
     assert(help.contains("starts a local development project"))
     assert(help.contains("repositoryLookup=disabled"))
     assert(help.contains("--component-dev-dir <dir> is a dependency component local override"))
+    assert(help.contains("cozyPublishLocalCar"))
+    assert(help.contains("~/.cncf/repository is local publish state"))
     assert(help.contains("descriptor source metadata lives under src/main/web-inf"))
     assert(help.contains("textus server <artifact> is the CAR/SAR artifact launcher"))
   }
@@ -460,6 +464,8 @@ final class CncfLauncherSpec {
     assert(output.contains("main-target source=local-project"))
     assert(output.contains("main-target-repository-lookup disabled in dev mode"))
     assert(output.contains("dependency-components local dev overrides"))
+    assert(output.contains("local-repository"))
+    assert(output.contains(paths.localRepository.toString))
     assert(output.contains("web-descriptor-source none; use src/main/web-inf/web.yaml|form.yaml|admin.yaml"))
   }
 

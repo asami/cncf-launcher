@@ -7,7 +7,7 @@ import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version May. 21, 2026
+ * @version May. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
@@ -122,7 +122,10 @@ final class DevSupport(
       DevCheckItem.ok("main-target-repository-lookup", "disabled in dev mode")
     )
     val dependencyresolution = Vector(
-      DevCheckItem.ok("dependency-components", "local dev overrides from --component-dev-dir/.cncf config; otherwise resolved by CNCF component repositories")
+      DevCheckItem.ok("dependency-components", "local dev overrides from --component-dev-dir/.cncf config; otherwise resolved by CNCF component repositories"),
+      _check_local_repository(paths.localRepository),
+      _check_local_repository(paths.localCarRepository),
+      _check_local_repository(paths.localSarRepository)
     )
     val runtimerequirements =
       if (context.runtimeRequirements.isEmpty)
@@ -279,6 +282,12 @@ final class DevSupport(
       else
         Vector(DevCheckItem.ok("runtime-classpath", s"${context.classpathFile} (${entries.size} entries)"))
     }
+
+  private def _check_local_repository(path: Path): DevCheckItem =
+    if (Files.isDirectory(path))
+      DevCheckItem.ok("local-repository", s"path=${path} exists=true")
+    else
+      DevCheckItem.warning("local-repository", s"path=${path} exists=false; run sbt cozyPublishLocalCar in dependency components")
 
   private def _runtime_classpath_auto(
     context: DevContext
