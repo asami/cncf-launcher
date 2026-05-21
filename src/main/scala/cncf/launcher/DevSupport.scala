@@ -113,7 +113,8 @@ final class DevSupport(
       if (context.useProjectClasspath) _check_classpath(context)
       else Vector(DevCheckItem.ok("runtime-classpath", "project classpath disabled"))
     val descriptors = _check_descriptors(context.project)
-    val webroots = _check_web_roots(context.project)
+    val webapproots = _check_web_app_roots(context.project)
+    val webdescriptors = _check_web_descriptors(context.project)
     val runtimedevdir = context.runtimeDevDir.toVector.flatMap(_check_runtime_dev_dir)
     val target = Vector(
       DevCheckItem.ok("main-target", s"source=local-project project=${context.project}"),
@@ -145,7 +146,7 @@ final class DevSupport(
       DevCheckItem.ok("project", context.project.toString),
       DevCheckItem.ok("runtime", context.runtimeLabel),
       DevCheckItem.ok("port", context.port)
-    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ classpath ++ descriptors ++ webroots ++ componentdirs ++ devdirs
+    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ classpath ++ descriptors ++ webapproots ++ webdescriptors ++ componentdirs ++ devdirs
   }
 
   def cncfArgs(
@@ -358,13 +359,22 @@ final class DevSupport(
       found.map(dir => DevCheckItem.ok("descriptor", dir.toString))
   }
 
-  private def _check_web_roots(project: Path): Vector[DevCheckItem] = {
-    val roots = Vector(project.resolve("car.d").resolve("web"), project.resolve("src").resolve("main").resolve("web"), project.resolve("web"))
+  private def _check_web_app_roots(project: Path): Vector[DevCheckItem] = {
+    val roots = Vector(project.resolve("src").resolve("main").resolve("web"), project.resolve("web"))
     val found = roots.filter(Files.isDirectory(_))
     if (found.isEmpty)
-      Vector(DevCheckItem.warning("web-root", "no car.d/web, src/main/web, or web directory found"))
+      Vector(DevCheckItem.ok("web-app-root", "none"))
     else
-      found.map(dir => DevCheckItem.ok("web-root", dir.toString))
+      found.map(dir => DevCheckItem.ok("web-app-root", dir.toString))
+  }
+
+  private def _check_web_descriptors(project: Path): Vector[DevCheckItem] = {
+    val roots = Vector(project.resolve("car.d").resolve("web"), project.resolve("src").resolve("main").resolve("car").resolve("web"))
+    val found = roots.filter(Files.isDirectory(_))
+    if (found.isEmpty)
+      Vector(DevCheckItem.ok("web-descriptor", "none"))
+    else
+      found.map(dir => DevCheckItem.ok("web-descriptor", s"car-runtime-metadata path=${dir}"))
   }
 
   private def _classpath_entries(value: String): Vector[Path] =
