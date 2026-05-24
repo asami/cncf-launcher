@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version May. 24, 2026
+ * @version May. 25, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -24,6 +24,15 @@ object CncfLauncherSpec {
     spec.runtimeDescriptorPrefersRuntimeJarDescriptor()
     spec.devParser()
     spec.devServerRewritesToCncfArgs()
+    spec.devServerParserSupportsProcessManagementOptions()
+    spec.devServerWritesStateDuringInvocation()
+    spec.devServerRejectsAliveExistingState()
+    spec.devServerStopExistingBeforeInvocation()
+    spec.devStopStopsExistingWithoutInvocation()
+    spec.devStopUsesRecordedPortWhenPortIsOmitted()
+    spec.devServerForceStopsAfterGracefulFailure()
+    spec.devServerRequiresForceForAmbiguousAliveState()
+    spec.devServerRejectsPidReuseWithoutForce()
     spec.devServerProfileAddsLocalPersistentSqliteArgs()
     spec.devConfigCanSelectExecutionProfile()
     spec.devServerUsesRuntimeDevelopmentDirectory()
@@ -36,6 +45,7 @@ object CncfLauncherSpec {
     spec.devProjectLoadsTargetProjectConfig()
     spec.devHelpExplainsResolutionModel()
     spec.devCheckReportsMainTargetAndDependencyResolution()
+    spec.devCheckReportsDevServerState()
     spec.devCheckTreatsMissingMainTargetClasspathAsWarning()
     spec.devCheckTreatsMissingDependencyClasspathAsError()
     spec.devServerAutoGeneratesMainTargetClasspath()
@@ -286,6 +296,23 @@ final class CncfLauncherSpec {
     _assert_equals(profile.options.executionProfile, Some(CncfCommand.DevExecutionProfile.LocalPersistent))
   }
 
+  def devServerParserSupportsProcessManagementOptions(): Unit = {
+    val server = CncfCommandParser.parse(Vector("dev", "server", "--stop-existing", "--force-existing"))
+      .asInstanceOf[CncfCommand.Dev.Server]
+    _assert_equals(server.options.stopExisting, true)
+    _assert_equals(server.options.forceExisting, true)
+
+    val restart = CncfCommandParser.parse(Vector("dev", "server", "--restart"))
+      .asInstanceOf[CncfCommand.Dev.Server]
+    _assert_equals(restart.options.stopExisting, true)
+
+    val stop = CncfCommandParser.parse(Vector("dev", "stop", "--project", "/tmp/blog", "--port", "19532", "--force-existing"))
+      .asInstanceOf[CncfCommand.Dev.Stop]
+    _assert_equals(stop.options.project, Some("/tmp/blog"))
+    _assert_equals(stop.options.port, Some("19532"))
+    _assert_equals(stop.options.forceExisting, true)
+  }
+
   def devServerRewritesToCncfArgs(): Unit = _with_temp_paths { paths =>
     val classdir = paths.cwd.resolve("target").resolve("scala-3.3.7").resolve("classes")
     Files.createDirectories(classdir)
@@ -313,6 +340,144 @@ final class CncfLauncherSpec {
     ))
     assert(invoker.lastArgs.contains("server"))
     assert(invoker.lastClasspath.contains(classdir))
+  }
+
+  def devServerWritesStateDuringInvocation(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    val processmanager = FakeDevServerProcessManager(1234L)
+    val invoker = FakeInvoker()
+    invoker.onInvoke = () => {
+      val pidfile = DevSupport.devServerPidFile(paths.cwd)
+      val jsonfile = DevSupport.devServerJsonFile(paths.cwd)
+      assert(Files.isRegularFile(pidfile))
+      assert(Files.isRegularFile(jsonfile))
+      _assert_equals(Files.readString(pidfile).trim, "1234")
+      val json = Files.readString(jsonfile)
+      assert(json.contains(""""port": "19601""""))
+      assert(json.contains(""""project": """))
+    }
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker, SbtRuntimeClasspathExporter, processmanager)
+
+    launcher.run(Vector("dev", "server", "--port", "19601"))
+
+    assert(!Files.exists(DevSupport.devServerPidFile(paths.cwd)))
+    assert(!Files.exists(DevSupport.devServerJsonFile(paths.cwd)))
+  }
+
+  def devServerRejectsAliveExistingState(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write_dev_server_state(paths.cwd, 2222L, "19602")
+    val processmanager = FakeDevServerProcessManager(3333L)
+    processmanager.alive = Set(2222L)
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), SbtRuntimeClasspathExporter, processmanager)
+    val failed =
+      try {
+        launcher.run(Vector("dev", "server", "--port", "19602"))
+        false
+      } catch {
+        case e: CncfException => e.getMessage.contains("dev server already running") && e.getMessage.contains("--restart")
+      }
+    assert(failed)
+  }
+
+  def devServerStopExistingBeforeInvocation(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write_dev_server_state(paths.cwd, 2223L, "19603")
+    val processmanager = FakeDevServerProcessManager(3334L)
+    processmanager.alive = Set(2223L)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker, SbtRuntimeClasspathExporter, processmanager)
+
+    launcher.run(Vector("dev", "server", "--port", "19603", "--stop-existing"))
+
+    _assert_equals(processmanager.gracefulStopped, Vector(2223L))
+    assert(invoker.lastArgs.contains("server"))
+  }
+
+  def devStopStopsExistingWithoutInvocation(): Unit = _with_temp_paths { paths =>
+    _write_dev_server_state(paths.cwd, 2224L, "19604")
+    val processmanager = FakeDevServerProcessManager(3335L)
+    processmanager.alive = Set(2224L)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker, SbtRuntimeClasspathExporter, processmanager)
+
+    launcher.run(Vector("dev", "stop", "--port", "19604"))
+
+    _assert_equals(processmanager.gracefulStopped, Vector(2224L))
+    _assert_equals(invoker.lastArgs, Vector.empty)
+    assert(!Files.exists(DevSupport.devServerJsonFile(paths.cwd)))
+  }
+
+  def devStopUsesRecordedPortWhenPortIsOmitted(): Unit = _with_temp_paths { paths =>
+    _write_dev_server_state(paths.cwd, 2227L, "19607")
+    val processmanager = FakeDevServerProcessManager(3339L)
+    processmanager.alive = Set(2227L)
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), SbtRuntimeClasspathExporter, processmanager)
+
+    launcher.run(Vector("dev", "stop"))
+
+    _assert_equals(processmanager.gracefulStopped, Vector(2227L))
+  }
+
+  def devServerForceStopsAfterGracefulFailure(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write_dev_server_state(paths.cwd, 2225L, "19605")
+    val processmanager = FakeDevServerProcessManager(3336L)
+    processmanager.alive = Set(2225L)
+    processmanager.gracefulSucceeds = false
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), SbtRuntimeClasspathExporter, processmanager)
+
+    launcher.run(Vector("dev", "server", "--port", "19605", "--stop-existing", "--force-existing"))
+
+    _assert_equals(processmanager.gracefulStopped, Vector(2225L))
+    _assert_equals(processmanager.forceStopped, Vector(2225L))
+  }
+
+  def devServerRequiresForceForAmbiguousAliveState(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(DevSupport.devServerPidFile(paths.cwd), "2226\n")
+    val processmanager = FakeDevServerProcessManager(3338L)
+    processmanager.alive = Set(2226L)
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), SbtRuntimeClasspathExporter, processmanager)
+    val failed =
+      try {
+        launcher.run(Vector("dev", "server", "--port", "19606", "--stop-existing"))
+        false
+      } catch {
+        case e: CncfException => e.getMessage.contains("state is ambiguous") && e.getMessage.contains("--force-existing")
+      }
+
+    assert(failed)
+  }
+
+  def devServerRejectsPidReuseWithoutForce(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write_dev_server_state(paths.cwd, 2228L, "19608", java.time.Instant.parse("2026-05-24T00:00:00Z"))
+    val processmanager = FakeDevServerProcessManager(3340L)
+    processmanager.alive = Set(2228L)
+    processmanager.processStarts = Map(2228L -> java.time.Instant.parse("2026-05-24T01:00:00Z"))
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), SbtRuntimeClasspathExporter, processmanager)
+    val failed =
+      try {
+        launcher.run(Vector("dev", "server", "--port", "19608", "--stop-existing"))
+        false
+      } catch {
+        case e: CncfException => e.getMessage.contains("state is ambiguous") && e.getMessage.contains("--force-existing")
+      }
+
+    assert(failed)
   }
 
   def devServerProfileAddsLocalPersistentSqliteArgs(): Unit = _with_temp_paths { paths =>
@@ -489,6 +654,9 @@ final class CncfLauncherSpec {
     assert(help.contains("--component-dev-dir <dir> is a dependency component local override"))
     assert(help.contains("cozyPublishLocalCar"))
     assert(help.contains("~/.cncf/repository is local publish state"))
+    assert(help.contains("cncf dev stop"))
+    assert(help.contains("--stop-existing"))
+    assert(help.contains("dev-server.pid"))
     assert(help.contains("descriptor source metadata lives under src/main/web-inf"))
     assert(help.contains("textus server <artifact> is the CAR/SAR artifact launcher"))
   }
@@ -505,6 +673,22 @@ final class CncfLauncherSpec {
     assert(output.contains("local-repository"))
     assert(output.contains(paths.localRepository.toString))
     assert(output.contains("web-descriptor-source none; use src/main/web-inf/web.yaml|form.yaml|admin.yaml"))
+  }
+
+  def devCheckReportsDevServerState(): Unit = _with_temp_paths { paths =>
+    _write_dev_server_state(paths.cwd, 2230L, "19610")
+    val processmanager = FakeDevServerProcessManager(3337L)
+    processmanager.alive = Set(2230L)
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), SbtRuntimeClasspathExporter, processmanager)
+    val (code, output) = _capture_stdout {
+      launcher.run(Vector("dev", "check", "--port", "19610"))
+    }
+
+    _assert_equals(code, 0)
+    assert(output.contains("dev-server"))
+    assert(output.contains("pid=2230"))
+    assert(output.contains("status=alive"))
+    assert(output.contains("port=19610"))
   }
 
   def devCheckTreatsMissingMainTargetClasspathAsWarning(): Unit = _with_temp_paths { paths =>
@@ -796,6 +980,27 @@ final class CncfLauncherSpec {
     path
   }
 
+  private def _write_dev_server_state(
+    project: Path,
+    pid: Long,
+    port: String,
+    processstartedat: java.time.Instant = java.time.Instant.parse("2026-05-24T00:00:00Z")
+  ): Unit = {
+    val state = DevServerState(
+      pid = pid,
+      project = project.toAbsolutePath.normalize,
+      port = port,
+      runtimeVersion = "0.9.0",
+      executionProfile = None,
+      startedAt = java.time.Instant.parse("2026-05-24T00:00:00Z"),
+      processStartedAt = Some(processstartedat),
+      commandLine = Some("cncf dev server"),
+      command = "cncf dev server"
+    )
+    _write(DevSupport.devServerPidFile(project), s"${pid}\n")
+    _write(DevSupport.devServerJsonFile(project), state.renderJson)
+  }
+
   private def _assert_equals[A](actual: A, expected: A): Unit =
     assert(actual == expected, s"expected=$expected actual=$actual")
 
@@ -898,13 +1103,64 @@ object FakeClasspathExporter {
 final class FakeInvoker extends CncfInvoker {
   var lastClasspath: Vector[Path] = Vector.empty
   var lastArgs: Vector[String] = Vector.empty
+  var onInvoke: () => Unit = () => ()
+
   override def invoke(classpath: Vector[Path], args: Vector[String]): Int = {
     lastClasspath = classpath
     lastArgs = args
+    onInvoke()
     0
   }
 }
 
 object FakeInvoker {
   def apply(): FakeInvoker = new FakeInvoker()
+}
+
+final class FakeDevServerProcessManager(
+  currentpid: Long
+) extends DevServerProcessManager {
+  var alive: Set[Long] = Set.empty
+  var defaultProcessStartedAt: Option[java.time.Instant] =
+    Some(java.time.Instant.parse("2026-05-24T00:00:00Z"))
+  var processStarts: Map[Long, java.time.Instant] =
+    Map(currentpid -> java.time.Instant.parse("2026-05-24T00:00:00Z"))
+  var commandLines: Map[Long, String] =
+    Map(currentpid -> "cncf dev server")
+  var gracefulStopped: Vector[Long] = Vector.empty
+  var forceStopped: Vector[Long] = Vector.empty
+  var gracefulSucceeds: Boolean = true
+
+  def currentPid: Long =
+    currentpid
+
+  def processStartedAt(pid: Long): Option[java.time.Instant] =
+    processStarts.get(pid).orElse(defaultProcessStartedAt)
+
+  def commandLine(pid: Long): Option[String] =
+    commandLines.get(pid)
+
+  def isAlive(pid: Long): Boolean =
+    alive.contains(pid)
+
+  def stopGracefully(pid: Long): Boolean = {
+    gracefulStopped :+= pid
+    if (gracefulSucceeds) {
+      alive -= pid
+      true
+    } else {
+      false
+    }
+  }
+
+  def stopForcibly(pid: Long): Boolean = {
+    forceStopped :+= pid
+    alive -= pid
+    true
+  }
+}
+
+object FakeDevServerProcessManager {
+  def apply(currentpid: Long): FakeDevServerProcessManager =
+    new FakeDevServerProcessManager(currentpid)
 }

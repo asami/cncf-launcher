@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 24, 2026
+ * @version May. 25, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -25,6 +25,8 @@ object CncfCommand {
     useProjectClasspath: Boolean = true,
     projectActivation: ProjectActivation = ProjectActivation.Auto,
     includeProjectComponentDevDir: Boolean = true,
+    stopExisting: Boolean = false,
+    forceExisting: Boolean = false,
     passthrough: Vector[String] = Vector.empty
   )
 
@@ -32,6 +34,7 @@ object CncfCommand {
     final case class Classpath(options: DevOptions) extends Dev
     final case class Check(options: DevOptions) extends Dev
     final case class Server(options: DevOptions) extends Dev
+    final case class Stop(options: DevOptions) extends Dev
     final case class ServerEmulation(options: DevOptions, args: Vector[String]) extends Dev
     final case class Client(options: DevOptions, args: Vector[String]) extends Dev
     final case class Command(options: DevOptions, operation: String, args: Vector[String]) extends Dev
@@ -183,6 +186,9 @@ object CncfCommandParser {
       case "server" =>
         if (rest.nonEmpty) throw CncfException(s"unknown cncf dev server arguments: ${rest.mkString(" ")}")
         CncfCommand.Dev.Server(effectiveoptions)
+      case "stop" =>
+        if (rest.nonEmpty) throw CncfException(s"unknown cncf dev stop arguments: ${rest.mkString(" ")}")
+        CncfCommand.Dev.Stop(effectiveoptions)
       case "server-emulation" | "server-emulator" | "emulate" =>
         CncfCommand.Dev.ServerEmulation(effectiveoptions, rest)
       case "client" =>
@@ -214,6 +220,8 @@ object CncfCommandParser {
     var useprojectclasspath = true
     var projectactivation = CncfCommand.ProjectActivation.Auto
     var includeprojectcomponentdevdir = true
+    var stopexisting = false
+    var forceexisting = false
     var i = 0
     while (i < args.length) {
       args(i) match {
@@ -293,6 +301,12 @@ object CncfCommandParser {
         case x if x.startsWith("--component-dev-dir=") =>
           componentdevdirs :+= x.stripPrefix("--component-dev-dir=")
           i += 1
+        case "--stop-existing" | "--restart" =>
+          stopexisting = true
+          i += 1
+        case "--force-existing" =>
+          forceexisting = true
+          i += 1
         case x if x.startsWith("--") =>
           runtimeargs :+= x
           if (!x.contains("=") && _runtime_arg_takes_value(x) && i + 1 < args.length) {
@@ -318,7 +332,9 @@ object CncfCommandParser {
       runtimeArgs = runtimeargs,
       useProjectClasspath = useprojectclasspath,
       projectActivation = projectactivation,
-      includeProjectComponentDevDir = includeprojectcomponentdevdir
+      includeProjectComponentDevDir = includeprojectcomponentdevdir,
+      stopExisting = stopexisting,
+      forceExisting = forceexisting
     ), rest.result())
   }
 
@@ -387,7 +403,8 @@ object CncfCommandParser {
       |  cncf launcher version
       |  cncf dev classpath [--project <dir>]
       |  cncf dev check [--project <dir>] [--runtime-dev-dir <dir>]
-      |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--profile local-persistent] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]
+      |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--stop-existing|--restart] [--force-existing] [--profile local-persistent] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]
+      |  cncf dev stop [--project <dir>] [--port <port>] [--force-existing]
       |  cncf dev server-emulation [--project <dir>] [--runtime-dev-dir <dir>] <component.service.operation|component/service/operation|url>
       |  cncf dev client [--project <dir>] [--runtime-dev-dir <dir>] [args...]
       |  cncf dev command [--project <dir>] [--runtime-dev-dir <dir>] [--project-activation auto|none|dev-dir|component-dir] [--no-project-classpath] [runtime args...] <operation> [params...]
@@ -421,6 +438,10 @@ object CncfCommandParser {
       |  --project <dir> selects the main target; without it, the current directory is the main target.
       |  The main target is repositoryLookup=disabled in dev mode and uses target/cncf.d/runtime-classpath.txt.
       |  Missing or empty main target classpath is generated automatically; run cncf dev classpath --project <dir> to prepare it manually.
+      |  cncf dev server records process state in target/cncf.d/dev-server.pid and dev-server.json.
+      |  A live server for the same project and port is not stopped by default; use --stop-existing or --restart to stop it before starting.
+      |  --force-existing permits force stop after graceful stop fails or ambiguous state overwrite.
+      |  cncf dev stop stops the recorded dev server for the selected project and port without starting a new server.
       |  --profile local-persistent stores development DataStore state in target/cncf.d/runtime.sqlite.
       |  The same profile can be configured as dev.profile: local-persistent in .cncf/config.yaml.
       |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.

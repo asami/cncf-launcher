@@ -7,14 +7,15 @@ import scala.util.Try
 
 /*
  * @since   May. 17, 2026
- * @version May. 22, 2026
+ * @version May. 25, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
   paths: LauncherPaths = LauncherPaths(),
   runtimeresolver: CncfRuntimeResolver = CoursierCncfRuntimeResolver(),
   cncfinvoker: CncfInvoker = CncfInvoker(),
-  classpathexporter: RuntimeClasspathExporter = SbtRuntimeClasspathExporter
+  classpathexporter: RuntimeClasspathExporter = SbtRuntimeClasspathExporter,
+  processmanager: DevServerProcessManager = DevServerProcessManager.System
 ) {
   def run(args: Vector[String]): Int = {
     val config = LauncherConfig.load(paths)
@@ -197,7 +198,7 @@ final class CncfLauncher(
     val store = RuntimeVersionStore(effectivepaths)
     val catalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
     val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
-    val devsupport = DevSupport(effectivepaths, classpathexporter)
+    val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
     val effectiveoptions = command.options.copy(project = None)
     val rawcontext = devsupport.context(effectiveoptions, effectiveconfig, store)
     val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
@@ -222,8 +223,15 @@ final class CncfLauncher(
         val items = devsupport.check(context)
         items.foreach(item => println(item.render))
         if (items.exists(_.isError)) 2 else 0
-      case CncfCommand.Dev.Server(_) =>
-        _invoke_dev(effectivepaths, context, effectiveconfig, devsupport, "server", Vector.empty)
+      case CncfCommand.Dev.Server(options) =>
+        val state = devsupport.prepareDevServerStart(context, options)
+        try {
+          _invoke_dev(effectivepaths, context, effectiveconfig, devsupport, "server", Vector.empty)
+        } finally {
+          devsupport.cleanupDevServerState(state)
+        }
+      case CncfCommand.Dev.Stop(options) =>
+        devsupport.stopDevServer(context, options.forceExisting, options.port.isDefined)
       case CncfCommand.Dev.ServerEmulation(_, args) =>
         _invoke_dev(effectivepaths, context, effectiveconfig, devsupport, "server-emulator", args)
       case CncfCommand.Dev.Client(_, args) =>

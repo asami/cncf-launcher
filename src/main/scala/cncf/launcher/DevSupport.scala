@@ -3,11 +3,13 @@ package cncf.launcher
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
+import java.time.Instant
+import scala.util.Try
 import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version May. 24, 2026
+ * @version May. 25, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
@@ -54,7 +56,8 @@ object SbtRuntimeClasspathExporter extends RuntimeClasspathExporter {
 
 final class DevSupport(
   paths: LauncherPaths,
-  classpathexporter: RuntimeClasspathExporter = SbtRuntimeClasspathExporter
+  classpathexporter: RuntimeClasspathExporter = SbtRuntimeClasspathExporter,
+  processmanager: DevServerProcessManager = DevServerProcessManager.System
 ) {
   def context(
     options: CncfCommand.DevOptions,
@@ -153,7 +156,82 @@ final class DevSupport(
       DevCheckItem.ok("project", context.project.toString),
       DevCheckItem.ok("runtime", context.runtimeLabel),
       DevCheckItem.ok("port", context.port)
-    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ executionprofile ++ classpath ++ descriptors ++ webapproots ++ webdescriptorsources ++ webdescriptors ++ componentdirs ++ devdirs
+    ) ++ target ++ _check_dev_server(context) ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ executionprofile ++ classpath ++ descriptors ++ webapproots ++ webdescriptorsources ++ webdescriptors ++ componentdirs ++ devdirs
+  }
+
+  def prepareDevServerStart(
+    context: DevContext,
+    options: CncfCommand.DevOptions
+  ): DevServerState = {
+    _handle_existing_dev_server(context, options.stopExisting, options.forceExisting)
+    val state = DevServerState(
+      pid = processmanager.currentPid,
+      project = context.project,
+      port = context.port,
+      runtimeVersion = context.runtimeLabel,
+      executionProfile = context.executionProfile.map(_.name),
+      startedAt = Instant.now(),
+      processStartedAt = processmanager.processStartedAt(processmanager.currentPid),
+      commandLine = processmanager.commandLine(processmanager.currentPid),
+      command = "cncf dev server"
+    )
+    _write_dev_server_state(state)
+    state
+  }
+
+  def cleanupDevServerState(state: DevServerState): Unit = {
+    val current = readDevServerState(state.project)
+    if (current.exists(_.pid == state.pid))
+      _delete_dev_server_state(state.project)
+  }
+
+  def stopDevServer(
+    context: DevContext,
+    forceexisting: Boolean,
+    portspecified: Boolean
+  ): Int = {
+    readDevServerState(context.project) match {
+      case Some(state) if !_same_path(state.project, context.project) && processmanager.isAlive(state.pid) && !forceexisting =>
+        throw CncfException(
+          s"dev server state is for a different project (${state.project}) but pid=${state.pid} is alive; use --force-existing to stop or overwrite it"
+        )
+      case Some(state) if portspecified && state.port.nonEmpty && state.port != context.port =>
+        println(s"dev-server: none for project=${context.project} port=${context.port}; recorded port=${state.port}")
+        0
+      case Some(state) =>
+        _stop_dev_server_state(state, forceexisting)
+        _delete_dev_server_state(context.project)
+        0
+      case None =>
+        _delete_dev_server_state(context.project)
+        println(s"dev-server: none for project=${context.project} port=${context.port}")
+        0
+    }
+  }
+
+  def readDevServerState(project: Path): Option[DevServerState] = {
+    val file = DevSupport.devServerJsonFile(project)
+    if (Files.isRegularFile(file)) {
+      DevServerState.parse(Files.readString(file, StandardCharsets.UTF_8), project)
+    } else {
+      val pidfile = DevSupport.devServerPidFile(project)
+      if (Files.isRegularFile(pidfile))
+        Try(Files.readString(pidfile, StandardCharsets.UTF_8).trim.toLong).toOption.map { pid =>
+          DevServerState(
+            pid = pid,
+            project = project,
+            port = "",
+            runtimeVersion = "",
+            executionProfile = None,
+            startedAt = Instant.EPOCH,
+            processStartedAt = None,
+            commandLine = None,
+            command = "cncf dev server"
+          )
+        }
+      else
+        None
+    }
   }
 
   def cncfArgs(
@@ -292,6 +370,119 @@ final class DevSupport(
       DevCheckItem.ok("local-repository", s"path=${path} exists=true")
     else
       DevCheckItem.warning("local-repository", s"path=${path} exists=false; run sbt cozyPublishLocalCar in dependency components")
+
+  private def _check_dev_server(context: DevContext): Vector[DevCheckItem] = {
+    val pidfile = DevSupport.devServerPidFile(context.project)
+    val jsonfile = DevSupport.devServerJsonFile(context.project)
+    readDevServerState(context.project) match {
+      case Some(state) =>
+        val alive = processmanager.isAlive(state.pid)
+        val portlabel = if (state.port.isEmpty) "-" else state.port
+        val status = if (alive) "alive" else "stale"
+        Vector(DevCheckItem.ok(
+          "dev-server",
+          s"state=${jsonfile} pidFile=${pidfile} pid=${state.pid} status=${status} project=${state.project} port=${portlabel}"
+        ))
+      case None =>
+        Vector(DevCheckItem.ok("dev-server", s"state=${jsonfile} pidFile=${pidfile} status=none"))
+    }
+  }
+
+  private def _handle_existing_dev_server(
+    context: DevContext,
+    stopexisting: Boolean,
+    forceexisting: Boolean
+  ): Unit =
+    readDevServerState(context.project).foreach { state =>
+      val alive = processmanager.isAlive(state.pid)
+      val verified = !alive || _is_verified_dev_server_state(state)
+      val projectmatches = _same_path(state.project, context.project)
+      val portmatches = state.port.isEmpty || state.port == context.port
+      if (alive && !verified && !forceexisting) {
+        throw CncfException(
+          s"dev server state is ambiguous for project=${context.project} pid=${state.pid}; use --force-existing to overwrite or stop it"
+        )
+      } else if (!projectmatches && alive && !forceexisting) {
+        throw CncfException(
+          s"dev server state is for a different project (${state.project}) but pid=${state.pid} is alive; use --force-existing to overwrite it"
+        )
+      } else if (alive && !portmatches && !forceexisting) {
+        throw CncfException(
+          s"dev server already running for project=${context.project} on recorded port=${state.port}; use --force-existing to overwrite state for port=${context.port}"
+        )
+      } else if (!portmatches) {
+        println(s"warning: dev server state for recorded port=${state.port} will be overwritten for port=${context.port}")
+        _delete_dev_server_state(context.project)
+      } else if (alive && state.port.isEmpty && !forceexisting) {
+        throw CncfException(
+          s"dev server state is ambiguous for project=${context.project} pid=${state.pid}; use --force-existing to overwrite or stop it"
+        )
+      } else if (alive && !stopexisting) {
+        throw CncfException(
+          s"dev server already running for project=${context.project} port=${context.port} pid=${state.pid}; use --stop-existing or --restart"
+        )
+      } else if (alive) {
+        _stop_dev_server_state(state, forceexisting)
+        _delete_dev_server_state(context.project)
+      } else {
+        println(s"warning: stale dev server state found at ${DevSupport.devServerJsonFile(context.project)}; overwriting")
+        _delete_dev_server_state(context.project)
+      }
+    }
+
+  private def _stop_dev_server_state(
+    state: DevServerState,
+    forceexisting: Boolean
+  ): Unit = {
+    val alive = processmanager.isAlive(state.pid)
+    val verified = !alive || _is_verified_dev_server_state(state)
+    if (!alive) {
+      println(s"warning: stale dev server state for pid=${state.pid}; removing state")
+    } else if (!verified && !forceexisting) {
+      throw CncfException(
+        s"dev server state is ambiguous for project=${state.project} pid=${state.pid}; use --force-existing to stop it"
+      )
+    } else if (state.port.isEmpty && !forceexisting) {
+      throw CncfException(
+        s"dev server state is ambiguous for project=${state.project} pid=${state.pid}; use --force-existing to stop it"
+      )
+    } else {
+      val graceful = processmanager.stopGracefully(state.pid)
+      if (graceful) {
+        println(s"stopped dev server pid=${state.pid} project=${state.project} port=${state.port}")
+      } else if (forceexisting && processmanager.stopForcibly(state.pid)) {
+        println(s"force-stopped dev server pid=${state.pid} project=${state.project} port=${state.port}")
+      } else {
+        throw CncfException(
+          s"failed to stop dev server pid=${state.pid} project=${state.project} port=${state.port}; use --force-existing to allow force stop"
+        )
+      }
+    }
+  }
+
+  private def _write_dev_server_state(state: DevServerState): Unit = {
+    val pidfile = DevSupport.devServerPidFile(state.project)
+    val jsonfile = DevSupport.devServerJsonFile(state.project)
+    Files.createDirectories(pidfile.getParent)
+    Files.writeString(pidfile, s"${state.pid}\n", StandardCharsets.UTF_8)
+    Files.writeString(jsonfile, state.renderJson + "\n", StandardCharsets.UTF_8)
+  }
+
+  private def _delete_dev_server_state(project: Path): Unit = {
+    Files.deleteIfExists(DevSupport.devServerPidFile(project))
+    Files.deleteIfExists(DevSupport.devServerJsonFile(project))
+  }
+
+  private def _same_path(
+    lhs: Path,
+    rhs: Path
+  ): Boolean =
+    lhs.toAbsolutePath.normalize == rhs.toAbsolutePath.normalize
+
+  private def _is_verified_dev_server_state(state: DevServerState): Boolean =
+    state.processStartedAt.exists { expected =>
+      processmanager.processStartedAt(state.pid).contains(expected)
+    }
 
   private def _runtime_classpath_auto(
     context: DevContext
@@ -450,6 +641,81 @@ final class DevSupport(
 object DevSupport {
   def runtimeClasspathFile(project: Path): Path =
     project.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")
+
+  def devServerPidFile(project: Path): Path =
+    project.resolve("target").resolve("cncf.d").resolve("dev-server.pid")
+
+  def devServerJsonFile(project: Path): Path =
+    project.resolve("target").resolve("cncf.d").resolve("dev-server.json")
+}
+
+final case class DevServerState(
+  pid: Long,
+  project: Path,
+  port: String,
+  runtimeVersion: String,
+  executionProfile: Option[String],
+  startedAt: Instant,
+  processStartedAt: Option[Instant],
+  commandLine: Option[String],
+  command: String
+) {
+  def renderJson: String =
+    Vector(
+      "{",
+      s"""  "pid": ${pid},""",
+      s"""  "project": "${DevServerState.escape(project.toString)}",""",
+      s"""  "port": "${DevServerState.escape(port)}",""",
+      s"""  "runtimeVersion": "${DevServerState.escape(runtimeVersion)}",""",
+      executionProfile.map(v => s"""  "executionProfile": "${DevServerState.escape(v)}",""").getOrElse("""  "executionProfile": null,"""),
+      s"""  "startedAt": "${startedAt.toString}",""",
+      processStartedAt.map(v => s"""  "processStartedAt": "${v.toString}",""").getOrElse("""  "processStartedAt": null,"""),
+      commandLine.map(v => s"""  "commandLine": "${DevServerState.escape(v)}",""").getOrElse("""  "commandLine": null,"""),
+      s"""  "command": "${DevServerState.escape(command)}"""",
+      "}"
+    ).mkString("\n")
+}
+
+object DevServerState {
+  def parse(
+    text: String,
+    fallbackproject: Path
+  ): Option[DevServerState] =
+    for {
+      pid <- _json_long(text, "pid")
+    } yield {
+      val project = _json_string(text, "project").map(Path.of(_)).getOrElse(fallbackproject)
+      DevServerState(
+        pid = pid,
+        project = project.toAbsolutePath.normalize,
+        port = _json_string(text, "port").getOrElse(""),
+        runtimeVersion = _json_string(text, "runtimeVersion").getOrElse(""),
+        executionProfile = _json_string(text, "executionProfile"),
+        startedAt = _json_string(text, "startedAt").flatMap(v => Try(Instant.parse(v)).toOption).getOrElse(Instant.EPOCH),
+        processStartedAt = _json_string(text, "processStartedAt").flatMap(v => Try(Instant.parse(v)).toOption),
+        commandLine = _json_string(text, "commandLine"),
+        command = _json_string(text, "command").getOrElse("cncf dev server")
+      )
+    }
+
+  def escape(value: String): String =
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+
+  private def _json_string(
+    text: String,
+    key: String
+  ): Option[String] = {
+    val pattern = ("\\\"" + key + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").r
+    pattern.findFirstMatchIn(text).map(_.group(1).replace("\\\"", "\"").replace("\\\\", "\\"))
+  }
+
+  private def _json_long(
+    text: String,
+    key: String
+  ): Option[Long] = {
+    val pattern = ("\\\"" + key + "\\\"\\s*:\\s*([0-9]+)").r
+    pattern.findFirstMatchIn(text).flatMap(m => Try(m.group(1).toLong).toOption)
+  }
 }
 
 final case class DevCheckItem(
