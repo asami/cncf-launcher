@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version May. 22, 2026
+ * @version May. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -24,6 +24,8 @@ object CncfLauncherSpec {
     spec.runtimeDescriptorPrefersRuntimeJarDescriptor()
     spec.devParser()
     spec.devServerRewritesToCncfArgs()
+    spec.devServerProfileAddsLocalPersistentSqliteArgs()
+    spec.devConfigCanSelectExecutionProfile()
     spec.devServerUsesRuntimeDevelopmentDirectory()
     spec.devCommandPassesRuntimeLeadingArgs()
     spec.devCommandKeepsSampleMainClassValueAsRuntimeArg()
@@ -259,6 +261,7 @@ final class CncfLauncherSpec {
     _assert_equals(server.options.project, Some("/tmp/blog"))
     _assert_equals(server.options.runtimeDevDir, Some("/tmp/cncf"))
     _assert_equals(server.options.port, Some("19599"))
+    _assert_equals(server.options.executionProfile, None)
     _assert_equals(server.options.componentDevDirs, Vector("../account"))
     _assert_equals(server.options.runtimeArgs, Vector("--repository-dir", "repository.d"))
     _assert_equals(server.options.projectActivation, CncfCommand.ProjectActivation.Auto)
@@ -278,6 +281,9 @@ final class CncfLauncherSpec {
     val emulation = CncfCommandParser.parse(Vector("dev", "server-emulation", "blog.component.search"))
       .asInstanceOf[CncfCommand.Dev.ServerEmulation]
     _assert_equals(emulation.args, Vector("blog.component.search"))
+    val profile = CncfCommandParser.parse(Vector("dev", "server", "--profile", "local-persistent"))
+      .asInstanceOf[CncfCommand.Dev.Server]
+    _assert_equals(profile.options.executionProfile, Some(CncfCommand.DevExecutionProfile.LocalPersistent))
   }
 
   def devServerRewritesToCncfArgs(): Unit = _with_temp_paths { paths =>
@@ -307,6 +313,38 @@ final class CncfLauncherSpec {
     ))
     assert(invoker.lastArgs.contains("server"))
     assert(invoker.lastClasspath.contains(classdir))
+  }
+
+  def devServerProfileAddsLocalPersistentSqliteArgs(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("dev", "server", "--profile", "local-persistent"))
+
+    val sqlitepath = paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime.sqlite").toAbsolutePath.normalize.toString
+    assert(invoker.lastArgs.contains(s"--textus.datastore.sqlite.path=$sqlitepath"))
+    assert(invoker.lastArgs.contains(s"--cncf.datastore.sqlite.path=$sqlitepath"))
+    assert(invoker.lastArgs.contains("--textus.datastore.sqlite.normalize-column-names=true"))
+    assert(Files.isDirectory(paths.cwd.resolve("target").resolve("cncf.d")))
+  }
+
+  def devConfigCanSelectExecutionProfile(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      """dev:
+        |  profile: local-persistent
+        |""".stripMargin)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("dev", "server"))
+
+    assert(invoker.lastArgs.exists(_.startsWith("--textus.datastore.sqlite.path=")))
   }
 
   def devServerUsesRuntimeDevelopmentDirectory(): Unit = _with_temp_paths { paths =>

@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 22, 2026
+ * @version May. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -18,6 +18,7 @@ object CncfCommand {
     runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
     runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
     runtimeDevDir: Option[String] = None,
+    executionProfile: Option[DevExecutionProfile] = None,
     port: Option[String] = None,
     componentDevDirs: Vector[String] = Vector.empty,
     runtimeArgs: Vector[String] = Vector.empty,
@@ -59,6 +60,25 @@ object CncfCommand {
 
   enum RuntimeUseTarget {
     case Auto, Global, Project
+  }
+
+  enum DevExecutionProfile {
+    case LocalPersistent
+
+    def name: String =
+      this match {
+        case LocalPersistent => "local-persistent"
+      }
+  }
+
+  object DevExecutionProfile {
+    def parse(value: String): DevExecutionProfile =
+      value.trim.toLowerCase match {
+        case "local-persistent" | "persistent-dev" =>
+          DevExecutionProfile.LocalPersistent
+        case other =>
+          throw CncfException(s"unknown cncf dev profile: $other")
+      }
   }
 
   case object Version extends CncfCommand
@@ -187,6 +207,7 @@ object CncfCommandParser {
     var runtimedevdir = globalruntimedevdir
     var selectionpolicy = globalselectionpolicy
     var runtimepolicy = nocompatiblepolicy
+    var executionprofile: Option[CncfCommand.DevExecutionProfile] = None
     var port: Option[String] = None
     var componentdevdirs = Vector.empty[String]
     var runtimeargs = Vector.empty[String]
@@ -223,6 +244,19 @@ object CncfCommandParser {
           i += 2
         case x if x.startsWith("--runtime-no-compatible=") =>
           runtimepolicy = Some(RuntimeNoCompatiblePolicy.parse(x.stripPrefix("--runtime-no-compatible=")))
+          i += 1
+        case "--profile" | "--execution-profile" | "--dev-profile" =>
+          if (i + 1 >= args.length) throw CncfException(s"${args(i)} requires a value")
+          executionprofile = Some(CncfCommand.DevExecutionProfile.parse(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--profile=") =>
+          executionprofile = Some(CncfCommand.DevExecutionProfile.parse(x.stripPrefix("--profile=")))
+          i += 1
+        case x if x.startsWith("--execution-profile=") =>
+          executionprofile = Some(CncfCommand.DevExecutionProfile.parse(x.stripPrefix("--execution-profile=")))
+          i += 1
+        case x if x.startsWith("--dev-profile=") =>
+          executionprofile = Some(CncfCommand.DevExecutionProfile.parse(x.stripPrefix("--dev-profile=")))
           i += 1
         case x if x.startsWith("--cncf-dev-dir=") =>
           runtimedevdir = Some(x.stripPrefix("--cncf-dev-dir="))
@@ -278,6 +312,7 @@ object CncfCommandParser {
       runtimeSelectionPolicy = selectionpolicy,
       runtimeNoCompatiblePolicy = runtimepolicy,
       runtimeDevDir = runtimedevdir,
+      executionProfile = executionprofile,
       port = port,
       componentDevDirs = componentdevdirs,
       runtimeArgs = runtimeargs,
@@ -352,7 +387,7 @@ object CncfCommandParser {
       |  cncf launcher version
       |  cncf dev classpath [--project <dir>]
       |  cncf dev check [--project <dir>] [--runtime-dev-dir <dir>]
-      |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]
+      |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--profile local-persistent] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]
       |  cncf dev server-emulation [--project <dir>] [--runtime-dev-dir <dir>] <component.service.operation|component/service/operation|url>
       |  cncf dev client [--project <dir>] [--runtime-dev-dir <dir>] [args...]
       |  cncf dev command [--project <dir>] [--runtime-dev-dir <dir>] [--project-activation auto|none|dev-dir|component-dir] [--no-project-classpath] [runtime args...] <operation> [params...]
@@ -379,12 +414,15 @@ object CncfCommandParser {
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
       |  Runtime args before server/client/command are forwarded to CncfMain.
+      |  --profile local-persistent configures target/cncf.d/runtime.sqlite as the local SQLite DataStore for development checks.
       |
       |Development resolution:
       |  cncf dev server starts a local development project, not a CAR/SAR artifact from a repository.
       |  --project <dir> selects the main target; without it, the current directory is the main target.
       |  The main target is repositoryLookup=disabled in dev mode and uses target/cncf.d/runtime-classpath.txt.
       |  Missing or empty main target classpath is generated automatically; run cncf dev classpath --project <dir> to prepare it manually.
+      |  --profile local-persistent stores development DataStore state in target/cncf.d/runtime.sqlite.
+      |  The same profile can be configured as dev.profile: local-persistent in .cncf/config.yaml.
       |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.
       |  Dependency components without local overrides are resolved by CNCF component repositories at runtime.
       |  The default local component repository is ~/.cncf/repository/repository/car and ~/.cncf/repository/repository/sar.

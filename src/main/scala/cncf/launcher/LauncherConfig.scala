@@ -5,7 +5,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 21, 2026
+ * @version May. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
@@ -14,6 +14,7 @@ final case class LauncherConfig(
   runtimeCatalogUrl: Option[String] = None,
   runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
   runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
+  devExecutionProfile: Option[CncfCommand.DevExecutionProfile] = None,
   devProject: Option[String] = None,
   devPort: Option[String] = None,
   devComponentDevDirs: Vector[String] = Vector.empty,
@@ -29,6 +30,7 @@ final case class LauncherConfig(
       runtimeCatalogUrl = higher.runtimeCatalogUrl.orElse(runtimeCatalogUrl),
       runtimeSelectionPolicy = higher.runtimeSelectionPolicy.orElse(runtimeSelectionPolicy),
       runtimeNoCompatiblePolicy = higher.runtimeNoCompatiblePolicy.orElse(runtimeNoCompatiblePolicy),
+      devExecutionProfile = higher.devExecutionProfile.orElse(devExecutionProfile),
       devProject = higher.devProject.orElse(devProject),
       devPort = higher.devPort.orElse(devPort),
       devComponentDevDirs = _merge_list(devComponentDevDirs, higher.devComponentDevDirs),
@@ -120,6 +122,8 @@ object LauncherConfig {
         map(RuntimeSelectionPolicy.parse),
       runtimeNoCompatiblePolicy = _first_("runtime.cncf.noCompatiblePolicy", "cncf.runtime.cncf.noCompatiblePolicy").
         map(RuntimeNoCompatiblePolicy.parse),
+      devExecutionProfile = _first_("dev.profile", "dev.executionProfile", "cncf.dev.profile", "cncf.dev.executionProfile").
+        map(CncfCommand.DevExecutionProfile.parse),
       devProject = _first_("dev.project", "cncf.dev.project"),
       devPort = _first_("dev.port", "cncf.dev.port"),
       devComponentDevDirs = _all_("dev.componentDevDirs", "dev.component.dev.dirs", "cncf.dev.componentDevDirs", "cncf.component.dev.dir"),
@@ -156,6 +160,7 @@ object LauncherConfig {
         map(_.stripSuffix("/repository/car")).
         getOrElse("~/.cncf/repository")
     val devproject = c.devProject.getOrElse("(not configured)")
+    val devprofile = c.devExecutionProfile.map(_.name).getOrElse("(not configured)")
     val devport = c.devPort.getOrElse(LauncherConfig.DEFAULT_DEV_PORT)
     val devdirs = c.devComponentDevDirs.mkString(", ")
     s"""runtime.version: $runtime
@@ -164,6 +169,7 @@ object LauncherConfig {
        |runtime.cncf.selectionPolicy: $selection
        |runtime.cncf.noCompatiblePolicy: $nocompatible
        |dev.project: $devproject
+       |dev.profile: $devprofile
        |dev.port: $devport
        |dev.componentDevDirs: $devdirs
        |local.repository: $localrepository

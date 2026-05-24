@@ -7,7 +7,7 @@ import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version May. 22, 2026
+ * @version May. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
@@ -18,6 +18,7 @@ final case class DevContext(
   runtimeVersion: String,
   runtimeRequirements: Vector[RuntimeRequirement],
   runtimeDevDir: Option[Path],
+  executionProfile: Option[CncfCommand.DevExecutionProfile],
   runtimeArgs: Vector[String],
   useProjectClasspath: Boolean,
   projectActivation: CncfCommand.ProjectActivation,
@@ -88,6 +89,7 @@ final class DevSupport(
       runtimeVersion = store.current(options.runtimeVersion, config),
       runtimeRequirements = runtimerequirements,
       runtimeDevDir = _resolve_runtime_dev_dir(project, options, config),
+      executionProfile = options.executionProfile.orElse(config.devExecutionProfile),
       runtimeArgs = options.runtimeArgs,
       useProjectClasspath = options.useProjectClasspath,
       projectActivation = projectactivation,
@@ -117,6 +119,7 @@ final class DevSupport(
     val webdescriptorsources = _check_web_descriptor_sources(context.project)
     val webdescriptors = _check_web_descriptors(context.project)
     val runtimedevdir = context.runtimeDevDir.toVector.flatMap(_check_runtime_dev_dir)
+    val executionprofile = Vector(_check_execution_profile(context))
     val target = Vector(
       DevCheckItem.ok("main-target", s"source=local-project project=${context.project}"),
       DevCheckItem.ok("main-target-repository-lookup", "disabled in dev mode")
@@ -150,7 +153,7 @@ final class DevSupport(
       DevCheckItem.ok("project", context.project.toString),
       DevCheckItem.ok("runtime", context.runtimeLabel),
       DevCheckItem.ok("port", context.port)
-    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ classpath ++ descriptors ++ webapproots ++ webdescriptorsources ++ webdescriptors ++ componentdirs ++ devdirs
+    ) ++ target ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ executionprofile ++ classpath ++ descriptors ++ webapproots ++ webdescriptorsources ++ webdescriptors ++ componentdirs ++ devdirs
   }
 
   def cncfArgs(
@@ -160,6 +163,7 @@ final class DevSupport(
   ): Vector[String] =
     context.componentDevDirs.flatMap(dir => Vector("--component-dev-dir", dir.toString)) ++
       context.componentDirs.flatMap(dir => Vector("--component-dir", dir.toString)) ++
+      _execution_profile_args(context) ++
       context.runtimeArgs ++
       Vector(mode) ++
       args ++
@@ -319,6 +323,32 @@ final class DevSupport(
       Vector(DevCheckItem.warning("runtime-dev-dir", s"${dir} missing ${file}; dev invocation will run sbt export Runtime / fullClasspath"))
     }
   }
+
+  private def _check_execution_profile(context: DevContext): DevCheckItem =
+    context.executionProfile match {
+      case Some(CncfCommand.DevExecutionProfile.LocalPersistent) =>
+        DevCheckItem.ok("execution-profile", s"local-persistent datastore=${_local_persistent_sqlite_path(context)}")
+      case None =>
+        DevCheckItem.ok("execution-profile", "default")
+    }
+
+  private def _execution_profile_args(context: DevContext): Vector[String] =
+    context.executionProfile match {
+      case Some(CncfCommand.DevExecutionProfile.LocalPersistent) =>
+        val path = _local_persistent_sqlite_path(context)
+        Files.createDirectories(path.getParent)
+        Vector(
+          s"--textus.datastore.sqlite.path=${path}",
+          s"--cncf.datastore.sqlite.path=${path}",
+          "--textus.datastore.sqlite.normalize-column-names=true",
+          "--cncf.datastore.sqlite.normalize-column-names=true"
+        )
+      case None =>
+        Vector.empty
+    }
+
+  private def _local_persistent_sqlite_path(context: DevContext): Path =
+    context.project.resolve("target").resolve("cncf.d").resolve("runtime.sqlite").toAbsolutePath.normalize
 
   private def _runtime_requirement(
     project: Path,
