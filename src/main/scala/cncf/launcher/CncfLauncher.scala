@@ -196,13 +196,23 @@ final class CncfLauncher(
     command: CncfCommand.Dev,
     configfiles: Vector[String]
   ): Int = {
-    val effectivepaths = _dev_paths(command.options)
-    val config = LauncherConfig.load(effectivepaths, configfiles)
+    val initialconfig = LauncherConfig.load(paths, configfiles)
+    val initialoptions = command.options.copy(target = _config_dev_target(command.options.target, initialconfig))
+    val effectivepaths = _dev_paths(initialoptions)
+    val config =
+      if (effectivepaths.cwd == paths.cwd)
+        initialconfig
+      else
+        LauncherConfig.load(effectivepaths, configfiles)
     val store = RuntimeVersionStore(effectivepaths)
     val basecatalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
     val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
     val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
-    val effectiveoptions = command.options.copy(target = _normalize_dev_target(command.options.target))
+    val effectiveoptions = command.options.copy(
+      target = _normalize_dev_target(_config_dev_target(command.options.target, baseconfig)),
+      stopExisting = command.options.stopExisting || baseconfig.devRestart.getOrElse(false),
+      forceExisting = command.options.forceExisting || baseconfig.devForceExisting.getOrElse(false)
+    )
     val rawcontext = devsupport.context(effectiveoptions, baseconfig, store)
     val catalog =
       rawcontext.runtimeDevDir.flatMap(RuntimeCatalogStore.loadRuntimeDevelopmentCatalog)
@@ -230,15 +240,15 @@ final class CncfLauncher(
         val items = devsupport.check(context)
         items.foreach(item => println(item.render))
         if (items.exists(_.isError)) 2 else 0
-      case CncfCommand.Dev.Server(options) =>
-        val state = devsupport.prepareDevServerStart(context, options)
+      case CncfCommand.Dev.Server(_) =>
+        val state = devsupport.prepareDevServerStart(context, effectiveoptions)
         try {
           _invoke_dev(effectivepaths, context, effectiveconfig, devsupport, "server", Vector.empty)
         } finally {
           devsupport.cleanupDevServerState(state)
         }
-      case CncfCommand.Dev.Stop(options) =>
-        devsupport.stopDevServer(context, options.forceExisting, options.port.isDefined)
+      case CncfCommand.Dev.Stop(_) =>
+        devsupport.stopDevServer(context, effectiveoptions.forceExisting, effectiveoptions.port.isDefined)
       case CncfCommand.Dev.ServerEmulation(_, args) =>
         _invoke_dev(effectivepaths, context, effectiveconfig, devsupport, "server-emulator", args)
       case CncfCommand.Dev.Client(_, args) =>
@@ -262,13 +272,13 @@ final class CncfLauncher(
         case "--config" | "--launcher-config" =>
           if (i + 1 >= args.length)
             throw CncfException(s"${args(i)} requires a value")
-          configfiles += args(i + 1)
+          configfiles += _config_file(args(i + 1))
           i += 2
         case x if x.startsWith("--config=") =>
-          configfiles += x.stripPrefix("--config=")
+          configfiles += _config_file(x.stripPrefix("--config="))
           i += 1
         case x if x.startsWith("--launcher-config=") =>
-          configfiles += x.stripPrefix("--launcher-config=")
+          configfiles += _config_file(x.stripPrefix("--launcher-config="))
           i += 1
         case x =>
           out += x
@@ -277,6 +287,9 @@ final class CncfLauncher(
     }
     (configfiles.result(), out.result())
   }
+
+  private def _config_file(path: String): String =
+    paths.cwd.resolve(path).normalize.toAbsolutePath.normalize.toString
 
   private def _dev_paths(
     options: CncfCommand.DevOptions
@@ -288,6 +301,16 @@ final class CncfLauncher(
         paths.withCwd(paths.cwd.resolve(path).normalize)
       case _ =>
         paths
+    }
+
+  private def _config_dev_target(
+    target: CncfCommand.DevTarget,
+    config: LauncherConfig
+  ): CncfCommand.DevTarget =
+    target match {
+      case CncfCommand.DevTarget.ProjectDev(None) =>
+        config.devProjectDev.map(p => CncfCommand.DevTarget.ProjectDev(Some(p))).getOrElse(target)
+      case x => x
     }
 
   private def _normalize_dev_target(

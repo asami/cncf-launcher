@@ -5,7 +5,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 25, 2026
+ * @version May. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
@@ -15,8 +15,10 @@ final case class LauncherConfig(
   runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
   runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
   devExecutionProfile: Option[CncfCommand.DevExecutionProfile] = None,
-  devProject: Option[String] = None,
+  devProjectDev: Option[String] = None,
   devPort: Option[String] = None,
+  devRestart: Option[Boolean] = None,
+  devForceExisting: Option[Boolean] = None,
   devComponentDevDirs: Vector[String] = Vector.empty,
   carRepositories: Vector[String] = Vector.empty,
   sarRepositories: Vector[String] = Vector.empty,
@@ -31,8 +33,10 @@ final case class LauncherConfig(
       runtimeSelectionPolicy = higher.runtimeSelectionPolicy.orElse(runtimeSelectionPolicy),
       runtimeNoCompatiblePolicy = higher.runtimeNoCompatiblePolicy.orElse(runtimeNoCompatiblePolicy),
       devExecutionProfile = higher.devExecutionProfile.orElse(devExecutionProfile),
-      devProject = higher.devProject.orElse(devProject),
+      devProjectDev = higher.devProjectDev.orElse(devProjectDev),
       devPort = higher.devPort.orElse(devPort),
+      devRestart = higher.devRestart.orElse(devRestart),
+      devForceExisting = higher.devForceExisting.orElse(devForceExisting),
       devComponentDevDirs = _merge_list(devComponentDevDirs, higher.devComponentDevDirs),
       carRepositories = _merge_list(carRepositories, higher.carRepositories),
       sarRepositories = _merge_list(sarRepositories, higher.sarRepositories),
@@ -128,20 +132,37 @@ object LauncherConfig {
       keys.toVector.flatMap(k => values.getOrElse(k, Vector.empty)).headOption.map(_.trim).filter(_.nonEmpty)
     def _all_(keys: String*): Vector[String] =
       keys.toVector.flatMap(k => values.getOrElse(k, Vector.empty)).map(_.trim).filter(_.nonEmpty).distinct
+    def _boolean_(keys: String*): Option[Boolean] =
+      _first_(keys*).map {
+        case "true" | "yes" | "on" | "1" => true
+        case "false" | "no" | "off" | "0" => false
+        case other => throw CncfException(s"invalid boolean config value: $other")
+      }
 
     LauncherConfig(
       runtimeVersion = _first_("runtime.version", "cncf.runtime.version", "version"),
-      runtimeDevDir = _first_("runtime.devDir", "runtime.dev.dir", "cncf.runtime.devDir", "cncf.runtime.dev.dir"),
+      runtimeDevDir = _first_("runtime.dev-dir", "runtime.dev_dir", "cncf.runtime.dev-dir", "cncf.runtime.dev_dir", "runtime.devDir", "runtime.dev.dir", "cncf.runtime.devDir", "cncf.runtime.dev.dir"),
       runtimeCatalogUrl = _first_("runtime.catalog.url", "cncf.runtime.catalog.url", "catalog.url"),
-      runtimeSelectionPolicy = _first_("runtime.cncf.selectionPolicy", "cncf.runtime.cncf.selectionPolicy").
+      runtimeSelectionPolicy = _first_("runtime.cncf.selection-policy", "runtime.cncf.selection_policy", "cncf.runtime.cncf.selection-policy", "cncf.runtime.cncf.selection_policy", "runtime.cncf.selectionPolicy", "cncf.runtime.cncf.selectionPolicy").
         map(RuntimeSelectionPolicy.parse),
-      runtimeNoCompatiblePolicy = _first_("runtime.cncf.noCompatiblePolicy", "cncf.runtime.cncf.noCompatiblePolicy").
+      runtimeNoCompatiblePolicy = _first_("runtime.cncf.no-compatible-policy", "runtime.cncf.no_compatible_policy", "cncf.runtime.cncf.no-compatible-policy", "cncf.runtime.cncf.no_compatible_policy", "runtime.cncf.noCompatiblePolicy", "cncf.runtime.cncf.noCompatiblePolicy").
         map(RuntimeNoCompatiblePolicy.parse),
-      devExecutionProfile = _first_("dev.profile", "dev.executionProfile", "cncf.dev.profile", "cncf.dev.executionProfile").
+      devExecutionProfile = _first_("dev.profile", "dev.execution-profile", "dev.execution_profile", "cncf.dev.profile", "cncf.dev.execution-profile", "cncf.dev.execution_profile", "dev.executionProfile", "cncf.dev.executionProfile").
         map(CncfCommand.DevExecutionProfile.parse),
-      devProject = _first_("dev.project", "cncf.dev.project"),
+      devProjectDev = _first_(
+        "dev.project-dev",
+        "dev.project_dev",
+        "cncf.dev.project-dev",
+        "cncf.dev.project_dev",
+        "dev.projectDev",
+        "cncf.dev.projectDev",
+        "dev.project",
+        "cncf.dev.project"
+      ),
       devPort = _first_("dev.port", "cncf.dev.port"),
-      devComponentDevDirs = _all_("dev.componentDevDirs", "dev.component.dev.dirs", "cncf.dev.componentDevDirs", "cncf.component.dev.dir"),
+      devRestart = _boolean_("dev.restart", "cncf.dev.restart", "dev.stop-existing", "dev.stop_existing", "cncf.dev.stop-existing", "cncf.dev.stop_existing", "dev.stopExisting", "cncf.dev.stopExisting"),
+      devForceExisting = _boolean_("dev.force-existing", "dev.force_existing", "cncf.dev.force-existing", "cncf.dev.force_existing", "dev.forceExisting", "cncf.dev.forceExisting"),
+      devComponentDevDirs = _all_("dev.component-dev-dirs", "dev.component_dev_dirs", "cncf.dev.component-dev-dirs", "cncf.dev.component_dev_dirs", "dev.componentDevDirs", "dev.component.dev.dirs", "cncf.dev.componentDevDirs", "cncf.component.dev.dir"),
       carRepositories = _all_("repositories.car", "componentRepositories.car", "cncf.repository.car", "cncf.component.repository.car"),
       sarRepositories = _all_("repositories.sar", "componentRepositories.sar", "cncf.repository.sar", "cncf.subsystem.repository.sar"),
       mavenRepositories = _all_("repositories.maven", "cncf.repository.maven"),
@@ -184,19 +205,23 @@ object LauncherConfig {
       c.carRepositories.find(_.contains("/.cncf/cache/car")).
         map(_.stripSuffix("/car")).
         getOrElse("~/.cncf/cache")
-    val devproject = c.devProject.getOrElse("(not configured)")
+    val devproject = c.devProjectDev.getOrElse("(not configured)")
     val devprofile = c.devExecutionProfile.map(_.name).getOrElse("(not configured)")
     val devport = c.devPort.getOrElse(LauncherConfig.DEFAULT_DEV_PORT)
+    val devrestart = c.devRestart.getOrElse(false)
+    val devforce = c.devForceExisting.getOrElse(false)
     val devdirs = c.devComponentDevDirs.mkString(", ")
     s"""runtime.version: $runtime
-       |runtime.devDir: $runtimedevdir
+       |runtime.dev-dir: $runtimedevdir
        |runtime.catalog.url: $catalog
-       |runtime.cncf.selectionPolicy: $selection
-       |runtime.cncf.noCompatiblePolicy: $nocompatible
-       |dev.project: $devproject
+       |runtime.cncf.selection-policy: $selection
+       |runtime.cncf.no-compatible-policy: $nocompatible
+       |dev.project-dev: $devproject
        |dev.profile: $devprofile
        |dev.port: $devport
-       |dev.componentDevDirs: $devdirs
+       |dev.restart: $devrestart
+       |dev.force-existing: $devforce
+       |dev.component-dev-dirs: $devdirs
        |local.repository: $localrepository
        |cache.repository: $cacherepository
        |local.repository.note: ~/.cncf/local is developer local publish state; ~/.cncf/cache is runtime-managed remote artifact cache

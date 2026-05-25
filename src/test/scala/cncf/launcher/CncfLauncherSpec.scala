@@ -16,6 +16,7 @@ object CncfLauncherSpec {
     spec.launcherVersion()
     spec.configMerge()
     spec.configFileOptionOverridesProjectConfig()
+    spec.configFileProjectDevSurvivesTargetCwdSwitch()
     spec.configFileOptionRequiresExistingFile()
     spec.runtimeVersionPrecedence()
     spec.runtimeUseWritesExpectedFiles()
@@ -112,7 +113,7 @@ final class CncfLauncherSpec {
         |  version: 0.2.0
         |  devDir: ../project-cncf
         |dev:
-        |  project: .
+        |  project-dev: .
         |  componentDevDirs:
         |    - ../project-component
         |repositories:
@@ -123,7 +124,7 @@ final class CncfLauncherSpec {
     _assert_equals(config.runtimeVersion, Some("0.2.0"))
     _assert_equals(config.runtimeDevDir, Some("../project-cncf"))
     _assert_equals(config.runtimeCatalogUrl, Some("https://global.example/catalog.yaml"))
-    _assert_equals(config.devProject, Some("."))
+    _assert_equals(config.devProjectDev, Some("."))
     _assert_equals(config.devPort, Some("19000"))
     _assert_equals(config.devComponentDevDirs, Vector("../project-component", "../global-component"))
     assert(config.carRepositories.head == "https://project.example/car")
@@ -157,6 +158,26 @@ final class CncfLauncherSpec {
     launcher.run(Vector("--config", "etc/debug.conf", "dev", "server"))
 
     _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
+    assert(!invoker.lastArgs.contains("--config"))
+    assert(!invoker.lastArgs.contains("etc/debug.conf"))
+  }
+
+  def configFileProjectDevSurvivesTargetCwdSwitch(): Unit = _with_temp_paths { paths =>
+    val project = paths.cwd.resolve("blog")
+    val classdir = project.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(project.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("etc").resolve("debug.conf"),
+      """runtime.version = 0.2.0
+        |dev.project-dev = blog
+        |dev.restart = true
+        |""".stripMargin)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("--config", "etc/debug.conf", "dev", "server"))
+
+    assert(invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString))
     assert(!invoker.lastArgs.contains("--config"))
     assert(!invoker.lastArgs.contains("etc/debug.conf"))
   }

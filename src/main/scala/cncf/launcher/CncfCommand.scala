@@ -445,9 +445,11 @@ object CncfCommandParser {
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
       |  --config <file> loads an additional launcher config file; CLI config wins over global/project config.
-      |  Config files may use YAML-style nesting or dotted key assignments such as runtime.devDir = ../cncf.
+      |  Config files may use YAML-style nesting or dotted key assignments such as runtime.dev-dir = ../cncf.
       |  Runtime args before server/client/command are forwarded to CncfMain.
       |  --profile local-persistent configures target/cncf.d/runtime.sqlite as the local SQLite DataStore for development checks.
+      |  Config dev.project-dev is the configuration equivalent of --project-dev.
+      |  Config dev.restart: true is the configuration equivalent of --restart / --stop-existing.
       |
       |Development resolution:
       |  cncf dev server defaults to --project-dev . and starts the current development project from source.
