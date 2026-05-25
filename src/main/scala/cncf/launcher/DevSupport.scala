@@ -9,22 +9,21 @@ import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version May. 25, 2026
+ * @version May. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
   project: Path,
+  target: CncfCommand.DevTarget,
+  targetArgs: Vector[String],
   port: String,
   componentDevDirs: Vector[Path],
-  componentDirs: Vector[Path],
   runtimeVersion: String,
   runtimeRequirements: Vector[RuntimeRequirement],
   runtimeDevDir: Option[Path],
   executionProfile: Option[CncfCommand.DevExecutionProfile],
   runtimeArgs: Vector[String],
   useProjectClasspath: Boolean,
-  projectActivation: CncfCommand.ProjectActivation,
-  includeProjectComponentDevDir: Boolean,
   passthrough: Vector[String]
 ) {
   def classpathFile: Path =
@@ -65,38 +64,31 @@ final class DevSupport(
     store: RuntimeVersionStore
   ): DevContext = {
     val project = _resolve_project(options, config)
-    val projectactivation = _resolve_project_activation(project, options)
-    val projectdevdirs = projectactivation match {
-      case CncfCommand.ProjectActivation.DevDir => Vector(project)
-      case _ => Vector.empty
-    }
-    val projectcomponentdirs = projectactivation match {
-      case CncfCommand.ProjectActivation.ComponentDir => Vector(project.resolve("component.d"))
-      case _ => Vector.empty
-    }
+    val targetartifact = _target_artifact(options.target, config)
+    val targetargs = _target_args(options.target, project, targetartifact)
+    val projectdevdirs =
+      if (_is_project_dev(options.target) && options.includeProjectDevDir) Vector(project)
+      else Vector.empty
     val devdirs = (projectdevdirs.map(_.toString) ++ config.devComponentDevDirs ++ options.componentDevDirs)
       .map(p => project.resolve(p).normalize)
       .map(_.toAbsolutePath.normalize)
       .distinct
-    val componentdirs = projectcomponentdirs
-      .map(_.toAbsolutePath.normalize)
-      .distinct
     val runtimerequirements =
       (_runtime_requirement(project, "main-target") ++
+        targetartifact.toVector.flatMap(_.runtimeRequirements) ++
         devdirs.filterNot(_ == project).flatMap(dir => _runtime_requirement(dir, s"dependency-component:$dir"))).filterNot(_.isEmpty).toVector
     DevContext(
       project = project,
+      target = options.target,
+      targetArgs = targetargs,
       port = options.port.orElse(config.devPort).getOrElse(LauncherConfig.DEFAULT_DEV_PORT),
       componentDevDirs = devdirs,
-      componentDirs = componentdirs,
       runtimeVersion = store.current(options.runtimeVersion, config),
       runtimeRequirements = runtimerequirements,
       runtimeDevDir = _resolve_runtime_dev_dir(project, options, config),
       executionProfile = options.executionProfile.orElse(config.devExecutionProfile),
       runtimeArgs = options.runtimeArgs,
-      useProjectClasspath = options.useProjectClasspath,
-      projectActivation = projectactivation,
-      includeProjectComponentDevDir = options.includeProjectComponentDevDir,
+      useProjectClasspath = options.useProjectClasspath && _is_project_dev(options.target),
       passthrough = options.passthrough
     )
   }
@@ -123,10 +115,7 @@ final class DevSupport(
     val webdescriptors = _check_web_descriptors(context.project)
     val runtimedevdir = context.runtimeDevDir.toVector.flatMap(_check_runtime_dev_dir)
     val executionprofile = Vector(_check_execution_profile(context))
-    val target = Vector(
-      DevCheckItem.ok("main-target", s"source=local-project project=${context.project}"),
-      DevCheckItem.ok("main-target-repository-lookup", "disabled in dev mode")
-    )
+    val target = _check_target(context)
     val dependencyresolution = Vector(
       DevCheckItem.ok("dependency-components", "local dev overrides from --component-dev-dir/.cncf config; otherwise resolved by CNCF component repositories"),
       _check_local_repository(paths.localRepository),
@@ -147,19 +136,13 @@ final class DevSupport(
       if (Files.isRegularFile(file) && Files.size(file) > 0L)
         DevCheckItem.ok("dependency-component-dev-dir", s"source=local-dev-dir path=${dir} classpath=${file}")
       else
-        DevCheckItem.error("dependency-component-dev-dir", s"${dir} missing ${file}; run cncf dev classpath --project ${dir}")
-    }
-    val componentdirs = context.componentDirs.map { dir =>
-      if (Files.isDirectory(dir))
-        DevCheckItem.ok("dependency-component-dir", s"source=local-artifact-dir path=${dir}")
-      else
-        DevCheckItem.error("dependency-component-dir", s"${dir} is not a directory")
+        DevCheckItem.error("dependency-component-dev-dir", s"${dir} missing ${file}; run cncf dev classpath --project-dev ${dir}")
     }
     Vector(
       DevCheckItem.ok("project", context.project.toString),
       DevCheckItem.ok("runtime", context.runtimeLabel),
       DevCheckItem.ok("port", context.port)
-    ) ++ target ++ _check_dev_server(context) ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ executionprofile ++ classpath ++ descriptors ++ webapproots ++ webdescriptorsources ++ webdescriptors ++ componentdirs ++ devdirs
+    ) ++ target ++ _check_dev_server(context) ++ dependencyresolution ++ runtimerequirements ++ runtimedevdir ++ executionprofile ++ classpath ++ descriptors ++ webapproots ++ webdescriptorsources ++ webdescriptors ++ devdirs
   }
 
   def prepareDevServerStart(
@@ -242,8 +225,8 @@ final class DevSupport(
     mode: String,
     args: Vector[String]
   ): Vector[String] =
-    context.componentDevDirs.flatMap(dir => Vector("--component-dev-dir", dir.toString)) ++
-      context.componentDirs.flatMap(dir => Vector("--component-dir", dir.toString)) ++
+    context.targetArgs ++
+      context.componentDevDirs.flatMap(dir => Vector("--component-dev-dir", dir.toString)) ++
       _execution_profile_args(context) ++
       context.runtimeArgs ++
       Vector(mode) ++
@@ -277,73 +260,123 @@ final class DevSupport(
     entries
   }
 
-
-  private def _resolve_project_activation(
-    project: Path,
-    options: CncfCommand.DevOptions
-  ): CncfCommand.ProjectActivation =
-    if (!options.useProjectClasspath) {
-      CncfCommand.ProjectActivation.None
-    } else {
-      options.projectActivation match {
-        case CncfCommand.ProjectActivation.Auto =>
-          if (_project_component_dir_has_artifacts(project))
-            CncfCommand.ProjectActivation.ComponentDir
-          else if (_has_explicit_runtime_source(options.runtimeArgs))
-            CncfCommand.ProjectActivation.None
-          else if (options.includeProjectComponentDevDir)
-            CncfCommand.ProjectActivation.DevDir
-          else
-            CncfCommand.ProjectActivation.None
-        case x => x
-      }
-    }
-
-
-  private def _has_explicit_runtime_source(args: Vector[String]): Boolean = {
-    val names = args.map(_.takeWhile(_ != '='))
-    names.exists { name =>
-      Set(
-        "--repository-dir",
-        "--component-dir",
-        "--component-car-dir",
-        "--component-sar-dir",
-        "--component-factory-class",
-        "--subsystem-sar-dir",
-        "--subsystem-dir",
-        "--subsystem"
-      ).contains(name)
-    }
-  }
-
-  private def _project_component_dir_has_artifacts(project: Path): Boolean = {
-    val dir = project.resolve("component.d")
-    if (!Files.isDirectory(dir)) {
-      false
-    } else {
-      val stream = Files.list(dir)
-      try {
-        import scala.jdk.CollectionConverters.*
-        stream.iterator().asScala.exists { path =>
-          val name = path.getFileName.toString
-          Files.isRegularFile(path) && (name.endsWith(".car") || name.endsWith(".sar"))
-        }
-      } finally {
-        stream.close()
-      }
-    }
-  }
-
   private def _resolve_project(
     options: CncfCommand.DevOptions,
     config: LauncherConfig
   ): Path =
-    options.project
-      .orElse(config.devProject)
-      .map(p => paths.cwd.resolve(p).normalize)
-      .getOrElse(paths.cwd)
-      .toAbsolutePath
-      .normalize
+    options.target match {
+      case CncfCommand.DevTarget.ProjectDev(Some(path)) =>
+        paths.cwd.resolve(path).normalize.toAbsolutePath.normalize
+      case CncfCommand.DevTarget.ProjectDev(None) =>
+        paths.cwd.toAbsolutePath.normalize
+      case CncfCommand.DevTarget.ProjectCar(path) =>
+        paths.cwd.resolve(path).normalize.toAbsolutePath.normalize
+      case _ =>
+        paths.cwd.toAbsolutePath.normalize
+    }
+
+  private def _is_project_dev(target: CncfCommand.DevTarget): Boolean =
+    target match {
+      case CncfCommand.DevTarget.ProjectDev(_) => true
+      case _ => false
+    }
+
+  private def _target_args(
+    target: CncfCommand.DevTarget,
+    project: Path,
+    targetartifact: Option[CncfResolvedArtifact]
+  ): Vector[String] =
+    target match {
+      case CncfCommand.DevTarget.ProjectDev(_) =>
+        Vector.empty
+      case CncfCommand.DevTarget.CarFile(path) =>
+        Vector("--component-file", project.resolve(path).normalize.toAbsolutePath.normalize.toString)
+      case CncfCommand.DevTarget.ProjectCar(_) =>
+        Vector("--component-file", _project_car_file(project).toString)
+      case CncfCommand.DevTarget.Name(value) =>
+        _name_target_args(targetartifact.getOrElse(throw CncfException("resolved artifact is missing for --name target")))
+    }
+
+  private def _target_artifact(
+    target: CncfCommand.DevTarget,
+    config: LauncherConfig
+  ): Option[CncfResolvedArtifact] =
+    target match {
+      case CncfCommand.DevTarget.Name(value) =>
+        Some(CncfArtifactResolver().resolve(CncfArtifactSelector.parse(value), config))
+      case _ =>
+        None
+    }
+
+  private def _name_target_args(
+    artifact: CncfResolvedArtifact
+  ): Vector[String] = {
+    val repositoryargs =
+      artifact.kind match {
+        case CncfArtifactKind.Car =>
+          artifact.repositories.map(r => s"--repository-dir=$r")
+        case CncfArtifactKind.Sar =>
+          artifact.repositories.map(r => s"--repository-dir=$r")
+        case CncfArtifactKind.Auto =>
+          Vector.empty
+      }
+    val artifactargs =
+      artifact.kind match {
+        case CncfArtifactKind.Car =>
+          Vector(s"--textus.component=${artifact.selector.name}") ++
+            artifact.selector.version.map(v => s"--textus.component.version=$v").toVector
+        case CncfArtifactKind.Sar =>
+          val name = artifact.selector.version.map(v => s"${artifact.selector.name}-$v").getOrElse(artifact.selector.name)
+          Vector(s"--textus.subsystem=$name")
+        case CncfArtifactKind.Auto =>
+          throw CncfException("unresolved dev artifact kind")
+      }
+    repositoryargs ++ artifactargs
+  }
+
+  private def _project_car_file(project: Path): Path = {
+    val target = project.resolve("target")
+    if (!Files.isDirectory(target))
+      throw CncfException(s"project-car target directory not found: ${target}")
+    val stream = Files.list(target)
+    try {
+      import scala.jdk.CollectionConverters.*
+      val files = stream.iterator().asScala.filter { path =>
+        val name = path.getFileName.toString
+        Files.isRegularFile(path) && (name.endsWith(".car") || name.endsWith(".sar"))
+      }.toVector
+      files.sortBy(path => -Files.getLastModifiedTime(path).toMillis).headOption.getOrElse {
+        throw CncfException(s"project-car archive not found under ${target}")
+      }
+    } finally {
+      stream.close()
+    }
+  }
+
+  private def _check_target(context: DevContext): Vector[DevCheckItem] =
+    context.target match {
+      case CncfCommand.DevTarget.ProjectDev(_) =>
+        Vector(
+          DevCheckItem.ok("dev-target", s"mode=project-dev project=${context.project}"),
+          DevCheckItem.ok("main-target", s"source=local-project project=${context.project}"),
+          DevCheckItem.ok("main-target-repository-lookup", "disabled in project-dev mode")
+        )
+      case CncfCommand.DevTarget.Name(value) =>
+        Vector(
+          DevCheckItem.ok("dev-target", s"mode=name artifact=${value}"),
+          DevCheckItem.ok("main-target-repository-lookup", "enabled for explicit --name target")
+        )
+      case CncfCommand.DevTarget.CarFile(path) =>
+        Vector(
+          DevCheckItem.ok("dev-target", s"mode=car-file file=${path}"),
+          DevCheckItem.ok("main-target-repository-lookup", "disabled for direct CAR/SAR file")
+        )
+      case CncfCommand.DevTarget.ProjectCar(path) =>
+        Vector(
+          DevCheckItem.ok("dev-target", s"mode=project-car project=${path}"),
+          DevCheckItem.ok("main-target-repository-lookup", "disabled for explicit project CAR/SAR target")
+        )
+    }
 
   private def _resolve_runtime_dev_dir(
     project: Path,
@@ -502,12 +535,12 @@ final class DevSupport(
     } catch {
       case e: CncfException =>
         throw CncfException(
-          s"failed to prepare main target runtime classpath for ${context.project}; run cncf dev classpath --project ${context.project}. cause=${e.getMessage}",
+          s"failed to prepare main target runtime classpath for ${context.project}; run cncf dev classpath --project-dev ${context.project}. cause=${e.getMessage}",
           e.code
         )
       case e: Throwable =>
         throw CncfException(
-          s"failed to prepare main target runtime classpath for ${context.project}; run cncf dev classpath --project ${context.project}. cause=${e.getMessage}",
+          s"failed to prepare main target runtime classpath for ${context.project}; run cncf dev classpath --project-dev ${context.project}. cause=${e.getMessage}",
           2
         )
     }

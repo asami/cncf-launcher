@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 25, 2026
+ * @version May. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -13,7 +13,7 @@ object CncfCommand {
   }
 
   final case class DevOptions(
-    project: Option[String] = None,
+    target: DevTarget = DevTarget.ProjectDev(None),
     runtimeVersion: Option[String] = None,
     runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
     runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
@@ -23,8 +23,7 @@ object CncfCommand {
     componentDevDirs: Vector[String] = Vector.empty,
     runtimeArgs: Vector[String] = Vector.empty,
     useProjectClasspath: Boolean = true,
-    projectActivation: ProjectActivation = ProjectActivation.Auto,
-    includeProjectComponentDevDir: Boolean = true,
+    includeProjectDevDir: Boolean = true,
     stopExisting: Boolean = false,
     forceExisting: Boolean = false,
     passthrough: Vector[String] = Vector.empty
@@ -57,8 +56,11 @@ object CncfCommand {
   }
 
 
-  enum ProjectActivation {
-    case Auto, None, DevDir, ComponentDir
+  enum DevTarget {
+    case ProjectDev(path: Option[String])
+    case Name(value: String)
+    case CarFile(path: String)
+    case ProjectCar(path: String)
   }
 
   enum RuntimeUseTarget {
@@ -209,7 +211,7 @@ object CncfCommandParser {
     globalruntimedevdir: Option[String]
   ): (CncfCommand.DevOptions, Vector[String]) = {
     val rest = Vector.newBuilder[String]
-    var project: Option[String] = None
+    var target: Option[CncfCommand.DevTarget] = None
     var runtimedevdir = globalruntimedevdir
     var selectionpolicy = globalselectionpolicy
     var runtimepolicy = nocompatiblepolicy
@@ -218,19 +220,43 @@ object CncfCommandParser {
     var componentdevdirs = Vector.empty[String]
     var runtimeargs = Vector.empty[String]
     var useprojectclasspath = true
-    var projectactivation = CncfCommand.ProjectActivation.Auto
-    var includeprojectcomponentdevdir = true
+    var includeprojectdevdir = true
     var stopexisting = false
     var forceexisting = false
     var i = 0
     while (i < args.length) {
       args(i) match {
-        case "--project" =>
-          if (i + 1 >= args.length) throw CncfException("--project requires a value")
-          project = Some(args(i + 1))
+        case "--project" | "--project-activation" =>
+          throw CncfException(s"${args(i)} is no longer supported; use --project-dev, --name, --car-file, or --project-car")
+        case x if x.startsWith("--project=") || x.startsWith("--project-activation=") =>
+          throw CncfException(s"${x.takeWhile(_ != '=')} is no longer supported; use --project-dev, --name, --car-file, or --project-car")
+        case "--project-dev" =>
+          if (i + 1 >= args.length) throw CncfException("--project-dev requires a value")
+          target = _set_dev_target(target, CncfCommand.DevTarget.ProjectDev(Some(args(i + 1))))
           i += 2
-        case x if x.startsWith("--project=") =>
-          project = Some(x.stripPrefix("--project="))
+        case x if x.startsWith("--project-dev=") =>
+          target = _set_dev_target(target, CncfCommand.DevTarget.ProjectDev(Some(x.stripPrefix("--project-dev="))))
+          i += 1
+        case "--name" =>
+          if (i + 1 >= args.length) throw CncfException("--name requires a value")
+          target = _set_dev_target(target, CncfCommand.DevTarget.Name(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--name=") =>
+          target = _set_dev_target(target, CncfCommand.DevTarget.Name(x.stripPrefix("--name=")))
+          i += 1
+        case "--car-file" =>
+          if (i + 1 >= args.length) throw CncfException("--car-file requires a value")
+          target = _set_dev_target(target, CncfCommand.DevTarget.CarFile(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--car-file=") =>
+          target = _set_dev_target(target, CncfCommand.DevTarget.CarFile(x.stripPrefix("--car-file=")))
+          i += 1
+        case "--project-car" =>
+          if (i + 1 >= args.length) throw CncfException("--project-car requires a value")
+          target = _set_dev_target(target, CncfCommand.DevTarget.ProjectCar(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--project-car=") =>
+          target = _set_dev_target(target, CncfCommand.DevTarget.ProjectCar(x.stripPrefix("--project-car=")))
           i += 1
         case "--runtime-dev-dir" | "--cncf-dev-dir" =>
           if (i + 1 >= args.length) throw CncfException(s"${args(i)} requires a value")
@@ -278,21 +304,10 @@ object CncfCommandParser {
           i += 1
         case "--no-project-classpath" =>
           useprojectclasspath = false
-          projectactivation = CncfCommand.ProjectActivation.None
-          includeprojectcomponentdevdir = false
+          includeprojectdevdir = false
           i += 1
         case "--no-project-component-dev-dir" =>
-          projectactivation = CncfCommand.ProjectActivation.None
-          includeprojectcomponentdevdir = false
-          i += 1
-        case "--project-activation" =>
-          if (i + 1 >= args.length) throw CncfException("--project-activation requires a value")
-          projectactivation = _project_activation(args(i + 1))
-          includeprojectcomponentdevdir = projectactivation != CncfCommand.ProjectActivation.None
-          i += 2
-        case x if x.startsWith("--project-activation=") =>
-          projectactivation = _project_activation(x.stripPrefix("--project-activation="))
-          includeprojectcomponentdevdir = projectactivation != CncfCommand.ProjectActivation.None
+          includeprojectdevdir = false
           i += 1
         case "--component-dev-dir" =>
           if (i + 1 >= args.length) throw CncfException("--component-dev-dir requires a value")
@@ -321,7 +336,7 @@ object CncfCommandParser {
       }
     }
     (CncfCommand.DevOptions(
-      project = project,
+      target = target.getOrElse(CncfCommand.DevTarget.ProjectDev(None)),
       runtimeVersion = runtimeversion,
       runtimeSelectionPolicy = selectionpolicy,
       runtimeNoCompatiblePolicy = runtimepolicy,
@@ -331,21 +346,19 @@ object CncfCommandParser {
       componentDevDirs = componentdevdirs,
       runtimeArgs = runtimeargs,
       useProjectClasspath = useprojectclasspath,
-      projectActivation = projectactivation,
-      includeProjectComponentDevDir = includeprojectcomponentdevdir,
+      includeProjectDevDir = includeprojectdevdir,
       stopExisting = stopexisting,
       forceExisting = forceexisting
     ), rest.result())
   }
 
-
-  private def _project_activation(value: String): CncfCommand.ProjectActivation =
-    value match {
-      case "auto" => CncfCommand.ProjectActivation.Auto
-      case "none" => CncfCommand.ProjectActivation.None
-      case "dev-dir" => CncfCommand.ProjectActivation.DevDir
-      case "component-dir" => CncfCommand.ProjectActivation.ComponentDir
-      case other => throw CncfException(s"unknown project activation: $other")
+  private def _set_dev_target(
+    current: Option[CncfCommand.DevTarget],
+    next: CncfCommand.DevTarget
+  ): Option[CncfCommand.DevTarget] =
+    current match {
+      case Some(_) => throw CncfException("cncf dev target options are mutually exclusive: use only one of --project-dev, --name, --car-file, --project-car")
+      case None => Some(next)
     }
 
   private def _runtime_arg_takes_value(arg: String): Boolean = {
@@ -402,13 +415,13 @@ object CncfCommandParser {
       |  cncf version
       |  cncf launcher version
       |  cncf --config etc/debug.conf dev server
-      |  cncf dev classpath [--project <dir>]
-      |  cncf dev check [--project <dir>] [--runtime-dev-dir <dir>]
-      |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--stop-existing|--restart] [--force-existing] [--profile local-persistent] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]
-      |  cncf dev stop [--project <dir>] [--port <port>] [--force-existing]
-      |  cncf dev server-emulation [--project <dir>] [--runtime-dev-dir <dir>] <component.service.operation|component/service/operation|url>
-      |  cncf dev client [--project <dir>] [--runtime-dev-dir <dir>] [args...]
-      |  cncf dev command [--project <dir>] [--runtime-dev-dir <dir>] [--project-activation auto|none|dev-dir|component-dir] [--no-project-classpath] [runtime args...] <operation> [params...]
+      |  cncf dev classpath [--project-dev <dir>]
+      |  cncf dev check [--project-dev <dir>] [--runtime-dev-dir <dir>]
+      |  cncf dev server [--project-dev <dir>|--name <artifact>[:<version>]|--car-file <file>|--project-car <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--stop-existing|--restart] [--force-existing] [--profile local-persistent] [--component-dev-dir <dir>...] [runtime args...]
+      |  cncf dev stop [--project-dev <dir>] [--port <port>] [--force-existing]
+      |  cncf dev server-emulation [--project-dev <dir>] [--runtime-dev-dir <dir>] <component.service.operation|component/service/operation|url>
+      |  cncf dev client [--project-dev <dir>] [--runtime-dev-dir <dir>] [args...]
+      |  cncf dev command [--project-dev <dir>] [--runtime-dev-dir <dir>] [--no-project-classpath] [runtime args...] <operation> [params...]
       |  cncf runtime current
       |  cncf runtime list
       |  cncf runtime local list
@@ -437,10 +450,13 @@ object CncfCommandParser {
       |  --profile local-persistent configures target/cncf.d/runtime.sqlite as the local SQLite DataStore for development checks.
       |
       |Development resolution:
-      |  cncf dev server starts a local development project, not a CAR/SAR artifact from a repository.
-      |  --project <dir> selects the main target; without it, the current directory is the main target.
-      |  The main target is repositoryLookup=disabled in dev mode and uses target/cncf.d/runtime-classpath.txt.
-      |  Missing or empty main target classpath is generated automatically; run cncf dev classpath --project <dir> to prepare it manually.
+      |  cncf dev server defaults to --project-dev . and starts the current development project from source.
+      |  --project-dev <dir> selects a development project; repository lookup is disabled for this main target.
+      |  --name <artifact>[:<version>] starts a CAR/SAR artifact from configured repositories.
+      |  --car-file <file> starts a CAR/SAR file directly.
+      |  --project-car <dir> starts an explicitly generated CAR/SAR from a project target directory.
+      |  The project-dev main target uses target/cncf.d/runtime-classpath.txt.
+      |  Missing or empty main target classpath is generated automatically; run cncf dev classpath --project-dev <dir> to prepare it manually.
       |  cncf dev server records process state in target/cncf.d/dev-server.pid and dev-server.json.
       |  A live server for the same project and port is not stopped by default; use --stop-existing or --restart to stop it before starting.
       |  --force-existing permits force stop after graceful stop fails or ambiguous state overwrite.
@@ -457,10 +473,10 @@ object CncfCommandParser {
       |  src/main/web/WEB-INF is for private Web resources, not generated descriptor source.
       |  textus server <artifact> is the CAR/SAR artifact launcher for repository-based application startup.
       |
-      |Project activation:
-      |  --project-activation controls how --project becomes a runtime component source.
-      |  --project-activation auto uses component.d artifacts, suppresses project activation when explicit runtime source args are present, otherwise uses component-dev-dir.
+      |Dev target policy:
+      |  Target options are mutually exclusive. No target option means --project-dev .
+      |  component.d and repository.d are not used implicitly by cncf dev server.
       |  --no-project-classpath invokes packaged CAR/SAR artifacts without current project classes.
-      |  --no-project-component-dev-dir keeps project classes without adding project as component-dev-dir.
+      |  --no-project-component-dev-dir keeps project classes on the launcher classpath without adding project as component-dev-dir.
       |""".stripMargin
 }

@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version May. 25, 2026
+ * @version May. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -43,7 +43,10 @@ object CncfLauncherSpec {
     spec.devCommandKeepsSampleMainClassValueAsRuntimeArg()
     spec.devCommandCanDisableProjectClasspath()
     spec.devCommandCanDisableProjectComponentDevDir()
-    spec.devCommandAutoActivatesComponentDirArtifacts()
+    spec.devCommandDoesNotAutoActivateComponentDirArtifacts()
+    spec.devTargetOptionsAreMutuallyExclusive()
+    spec.devNameTargetUsesLocalSnapshotOnly()
+    spec.devNameTargetUsesReleaseRepositories()
     spec.devServerEmulationRewritesToCncfArgs()
     spec.devProjectLoadsTargetProjectConfig()
     spec.devHelpExplainsResolutionModel()
@@ -305,20 +308,19 @@ final class CncfLauncherSpec {
       "--runtime", "0.4.7",
       "--runtime-dev-dir", "/tmp/cncf",
       "dev", "server",
-      "--project", "/tmp/blog",
+      "--project-dev", "/tmp/blog",
       "--port", "19599",
       "--component-dev-dir", "../account",
       "--repository-dir", "repository.d"
     )).asInstanceOf[CncfCommand.Dev.Server]
     _assert_equals(server.options.runtimeVersion, Some("0.4.7"))
     _assert_equals(server.options.runtimeSelectionPolicy, None)
-    _assert_equals(server.options.project, Some("/tmp/blog"))
+    _assert_equals(server.options.target, CncfCommand.DevTarget.ProjectDev(Some("/tmp/blog")))
     _assert_equals(server.options.runtimeDevDir, Some("/tmp/cncf"))
     _assert_equals(server.options.port, Some("19599"))
     _assert_equals(server.options.executionProfile, None)
     _assert_equals(server.options.componentDevDirs, Vector("../account"))
     _assert_equals(server.options.runtimeArgs, Vector("--repository-dir", "repository.d"))
-    _assert_equals(server.options.projectActivation, CncfCommand.ProjectActivation.Auto)
 
     val command = CncfCommandParser.parse(Vector("dev", "command", "blog.post.search", "limit=10"))
       .asInstanceOf[CncfCommand.Dev.Command]
@@ -350,9 +352,9 @@ final class CncfLauncherSpec {
       .asInstanceOf[CncfCommand.Dev.Server]
     _assert_equals(restart.options.stopExisting, true)
 
-    val stop = CncfCommandParser.parse(Vector("dev", "stop", "--project", "/tmp/blog", "--port", "19532", "--force-existing"))
+    val stop = CncfCommandParser.parse(Vector("dev", "stop", "--project-dev", "/tmp/blog", "--port", "19532", "--force-existing"))
       .asInstanceOf[CncfCommand.Dev.Stop]
-    _assert_equals(stop.options.project, Some("/tmp/blog"))
+    _assert_equals(stop.options.target, CncfCommand.DevTarget.ProjectDev(Some("/tmp/blog")))
     _assert_equals(stop.options.port, Some("19532"))
     _assert_equals(stop.options.forceExisting, true)
   }
@@ -660,7 +662,7 @@ final class CncfLauncherSpec {
   }
 
 
-  def devCommandAutoActivatesComponentDirArtifacts(): Unit = _with_temp_paths { paths =>
+  def devCommandDoesNotAutoActivateComponentDirArtifacts(): Unit = _with_temp_paths { paths =>
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
@@ -669,9 +671,59 @@ final class CncfLauncherSpec {
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     val code = launcher.run(Vector("dev", "command", "testcomp.main.hello"))
     _assert_equals(code, 0)
-    _assert_equals(invoker.lastArgs.take(2), Vector("--component-dir", paths.cwd.resolve("component.d").toString))
-    assert(!invoker.lastArgs.contains("--component-dev-dir"))
+    assert(!invoker.lastArgs.contains("--component-dir"))
+    assert(invoker.lastArgs.contains("--component-dev-dir"))
     assert(invoker.lastClasspath.contains(classdir))
+  }
+
+  def devTargetOptionsAreMutuallyExclusive(): Unit = {
+    val failed =
+      try {
+        CncfCommandParser.parse(Vector("dev", "server", "--project-dev", "app", "--name", "textus-blog"))
+        false
+      } catch {
+        case e: CncfException => e.getMessage.contains("mutually exclusive")
+      }
+    assert(failed)
+    val oldproject =
+      try {
+        CncfCommandParser.parse(Vector("dev", "server", "--project", "app"))
+        false
+      } catch {
+        case e: CncfException => e.getMessage.contains("--project is no longer supported")
+      }
+    assert(oldproject)
+  }
+
+  def devNameTargetUsesLocalSnapshotOnly(): Unit = _with_temp_paths { paths =>
+    val name = "textus-demo"
+    val version = "0.1.0-SNAPSHOT"
+    _write(paths.localCarRepository.resolve(name).resolve(version).resolve(s"$name-$version.car"), "fake-car")
+    _write(paths.cacheCarRepository.resolve(name).resolve(version).resolve(s"$name-$version.car"), "wrong-car")
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("dev", "server", "--name", s"$name:$version"))
+
+    assert(invoker.lastArgs.contains(s"--textus.component=$name"))
+    assert(invoker.lastArgs.contains(s"--textus.component.version=$version"))
+    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}"))
+    assert(!invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}"))
+  }
+
+  def devNameTargetUsesReleaseRepositories(): Unit = _with_temp_paths { paths =>
+    val name = "textus-demo"
+    val version = "0.1.0"
+    _write(paths.cacheCarRepository.resolve(name).resolve(version).resolve(s"$name-$version.car"), "fake-car")
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("dev", "server", "--name", s"$name:$version"))
+
+    assert(invoker.lastArgs.contains(s"--textus.component=$name"))
+    assert(invoker.lastArgs.contains(s"--textus.component.version=$version"))
+    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}"))
+    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}"))
   }
 
   def devServerEmulationRewritesToCncfArgs(): Unit = _with_temp_paths { paths =>
@@ -706,7 +758,7 @@ final class CncfLauncherSpec {
          |""".stripMargin)
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
-    launcher.run(Vector("dev", "server", "--project", "blog"))
+    launcher.run(Vector("dev", "server", "--project-dev", "blog"))
     assert(invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString))
     assert(!invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")))
   }
@@ -714,12 +766,16 @@ final class CncfLauncherSpec {
   def devHelpExplainsResolutionModel(): Unit = {
     val help = CncfCommandParser.helpText
     assert(help.contains("Development resolution:"))
-    assert(help.contains("starts a local development project"))
-    assert(help.contains("repositoryLookup=disabled"))
+    assert(help.contains("defaults to --project-dev ."))
+    assert(help.contains("--name <artifact>[:<version>]"))
+    assert(help.contains("--car-file <file>"))
+    assert(help.contains("--project-car <dir>"))
+    assert(help.contains("repository lookup is disabled"))
     assert(help.contains("--component-dev-dir <dir> is a dependency component local override"))
     assert(help.contains("cozyPublishLocalCar"))
     assert(help.contains("~/.cncf/local is developer local publish state"))
     assert(help.contains("Snapshot components are local-only"))
+    assert(help.contains("component.d and repository.d are not used implicitly"))
     assert(help.contains("cncf dev stop"))
     assert(help.contains("--stop-existing"))
     assert(help.contains("dev-server.pid"))
@@ -733,8 +789,9 @@ final class CncfLauncherSpec {
       launcher.run(Vector("dev", "check"))
     }
     _assert_equals(code, 0)
+    assert(output.contains("dev-target mode=project-dev"))
     assert(output.contains("main-target source=local-project"))
-    assert(output.contains("main-target-repository-lookup disabled in dev mode"))
+    assert(output.contains("main-target-repository-lookup disabled in project-dev mode"))
     assert(output.contains("dependency-components local dev overrides"))
     assert(output.contains("local-repository"))
     assert(output.contains(paths.localRepository.toString))
@@ -779,7 +836,7 @@ final class CncfLauncherSpec {
     _assert_equals(code, 2)
     assert(output.contains("ERROR"))
     assert(output.contains("dependency-component-dev-dir"))
-    assert(output.contains("run cncf dev classpath --project"))
+    assert(output.contains("run cncf dev classpath --project-dev"))
   }
 
   def devServerAutoGeneratesMainTargetClasspath(): Unit = _with_temp_paths { paths =>
@@ -809,7 +866,7 @@ final class CncfLauncherSpec {
       } catch {
         case e: CncfException =>
           e.getMessage.contains("failed to prepare main target runtime classpath") &&
-            e.getMessage.contains("run cncf dev classpath --project") &&
+            e.getMessage.contains("run cncf dev classpath --project-dev") &&
             e.getMessage.contains("sbt failed")
       }
     assert(failed)

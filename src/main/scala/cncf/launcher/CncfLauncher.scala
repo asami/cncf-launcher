@@ -7,7 +7,7 @@ import scala.util.Try
 
 /*
  * @since   May. 17, 2026
- * @version May. 25, 2026
+ * @version May. 26, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -202,7 +202,7 @@ final class CncfLauncher(
     val basecatalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
     val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
     val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
-    val effectiveoptions = command.options.copy(project = None)
+    val effectiveoptions = command.options.copy(target = _normalize_dev_target(command.options.target))
     val rawcontext = devsupport.context(effectiveoptions, baseconfig, store)
     val catalog =
       rawcontext.runtimeDevDir.flatMap(RuntimeCatalogStore.loadRuntimeDevelopmentCatalog)
@@ -281,9 +281,23 @@ final class CncfLauncher(
   private def _dev_paths(
     options: CncfCommand.DevOptions
   ): LauncherPaths =
-    options.project
-      .map(p => paths.withCwd(paths.cwd.resolve(p).normalize))
-      .getOrElse(paths)
+    options.target match {
+      case CncfCommand.DevTarget.ProjectDev(Some(path)) =>
+        paths.withCwd(paths.cwd.resolve(path).normalize)
+      case CncfCommand.DevTarget.ProjectCar(path) =>
+        paths.withCwd(paths.cwd.resolve(path).normalize)
+      case _ =>
+        paths
+    }
+
+  private def _normalize_dev_target(
+    target: CncfCommand.DevTarget
+  ): CncfCommand.DevTarget =
+    target match {
+      case CncfCommand.DevTarget.ProjectDev(Some(_)) => CncfCommand.DevTarget.ProjectDev(None)
+      case CncfCommand.DevTarget.ProjectCar(_) => CncfCommand.DevTarget.ProjectCar(".")
+      case x => x
+    }
 
   private def _invoke_dev(
     effectivepaths: LauncherPaths,

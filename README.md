@@ -20,6 +20,9 @@ cncf dev classpath
 cncf dev check
 cncf dev server
 cncf dev server --runtime-dev-dir ../cncf
+cncf dev server --project-dev ../textus-knowledge-editor
+cncf dev server --name textus-knowledge-editor:0.1.0-SNAPSHOT
+cncf dev server --car-file target/textus-knowledge-editor-0.1.0-SNAPSHOT.car
 cncf dev server-emulation my-component.my-service.my-operation
 ```
 
@@ -29,16 +32,22 @@ cncf dev server-emulation my-component.my-service.my-operation
 target/cncf.d/runtime-classpath.txt
 ```
 
-`cncf dev server` invokes `org.goldenport.cncf.CncfMain` in the same JVM. It is
-the development-project launcher: `--project <dir>` selects the main target,
-and the current directory is the default main target. The main target is not
-resolved from CAR/SAR repositories in dev mode, even when `project.yaml` says
-`packaging.kind: car`.
+`cncf dev server` invokes `org.goldenport.cncf.CncfMain` in the same JVM. It
+defaults to `--project-dev .`, meaning the current development directory is
+the main target. Use `--project-dev <dir>` to select another development
+project. The project-dev target is not resolved from CAR/SAR repositories in
+dev mode, even when `project.yaml` says `packaging.kind: car`.
+
+Packaged targets are explicit. Use `--name <artifact>[:<version>]` for a
+repository/local artifact, `--car-file <file>` for a direct CAR/SAR file, or
+`--project-car <dir>` for a CAR/SAR already generated under a project target
+directory. Target options are mutually exclusive.
 
 The main target uses `target/cncf.d/runtime-classpath.txt`. If the file is
 missing or empty, `cncf dev server`, `cncf dev client`, `cncf dev command`, and
 `cncf dev server-emulation` prepare it automatically from `Runtime /
-fullClasspath`. Use `cncf dev classpath --project <dir>` to prepare it manually.
+fullClasspath`. Use `cncf dev classpath --project-dev <dir>` to prepare it
+manually.
 
 Dependency components are separate from the main target. Use
 `--component-dev-dir <dir>` or `.cncf/config.yaml` `dev.componentDevDirs` for
@@ -69,7 +78,7 @@ The launcher reads only:
 $PWD/.cncf/config.yaml
 ```
 
-For `cncf dev ... --project <dir>`, the project config is `<dir>/.cncf/config.yaml`.
+For `cncf dev ... --project-dev <dir>`, the project config is `<dir>/.cncf/config.yaml`.
 
 Example:
 
@@ -106,6 +115,10 @@ runtime-managed remote artifact cache and can be deleted without removing
 locally published development artifacts. Snapshot components are local-only by
 default; if a snapshot is missing, publish it locally instead of expecting
 public/cache lookup.
+
+`component.d` and `repository.d` are not used implicitly by `cncf dev server`.
+Configure repositories explicitly or publish dependency components to
+`~/.cncf/local`.
 
 `.cozy/config.yaml` belongs to build/publish operation defaults.
 `.cncf/config.yaml` belongs to runtime lookup and development startup.
