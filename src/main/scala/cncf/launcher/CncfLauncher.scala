@@ -18,8 +18,9 @@ final class CncfLauncher(
   processmanager: DevServerProcessManager = DevServerProcessManager.System
 ) {
   def run(args: Vector[String]): Int = {
-    val config = LauncherConfig.load(paths)
-    val command = CncfCommandParser.parse(args)
+    val (configfiles, commandargs) = _take_config_options(args)
+    val config = LauncherConfig.load(paths, configfiles)
+    val command = CncfCommandParser.parse(commandargs)
     command match {
       case CncfCommand.Version =>
         println(s"${LauncherBuildInfo.name} ${LauncherBuildInfo.version}")
@@ -30,7 +31,7 @@ final class CncfLauncher(
       case runtime: CncfCommand.Runtime =>
         _run_runtime(runtime, config)
       case dev: CncfCommand.Dev =>
-        _run_dev(dev)
+        _run_dev(dev, configfiles)
     }
   }
 
@@ -104,6 +105,7 @@ final class CncfLauncher(
       case CncfCommand.Runtime.CacheStatus() =>
         println(s"cncf home: ${paths.cncfHome}")
         println(s"local repository: ${paths.localRepository}")
+        println(s"artifact cache: ${paths.cacheRepository}")
         println(s"runtime cache: ${paths.runtimeRoot}")
         println(s"coursier cache: ${paths.coursierCache}")
         0
@@ -191,16 +193,21 @@ final class CncfLauncher(
     }
 
   private def _run_dev(
-    command: CncfCommand.Dev
+    command: CncfCommand.Dev,
+    configfiles: Vector[String]
   ): Int = {
     val effectivepaths = _dev_paths(command.options)
-    val config = LauncherConfig.load(effectivepaths)
+    val config = LauncherConfig.load(effectivepaths, configfiles)
     val store = RuntimeVersionStore(effectivepaths)
-    val catalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
-    val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
+    val basecatalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
+    val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
     val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
     val effectiveoptions = command.options.copy(project = None)
-    val rawcontext = devsupport.context(effectiveoptions, effectiveconfig, store)
+    val rawcontext = devsupport.context(effectiveoptions, baseconfig, store)
+    val catalog =
+      rawcontext.runtimeDevDir.flatMap(RuntimeCatalogStore.loadRuntimeDevelopmentCatalog)
+        .orElse(basecatalog)
+    val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
     val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
       orElse(effectiveconfig.runtimeSelectionPolicy).
       getOrElse(RuntimeSelectionPolicy.CurrentCompatible)
@@ -239,6 +246,36 @@ final class CncfLauncher(
       case CncfCommand.Dev.Command(_, operation, args) =>
         _invoke_dev(effectivepaths, context, effectiveconfig, devsupport, "command", operation +: args)
     }
+  }
+
+  private def _take_config_options(
+    args: Vector[String]
+  ): (Vector[String], Vector[String]) = {
+    val configfiles = Vector.newBuilder[String]
+    val out = Vector.newBuilder[String]
+    var i = 0
+    while (i < args.length) {
+      args(i) match {
+        case "--" =>
+          out ++= args.drop(i)
+          i = args.length
+        case "--config" | "--launcher-config" =>
+          if (i + 1 >= args.length)
+            throw CncfException(s"${args(i)} requires a value")
+          configfiles += args(i + 1)
+          i += 2
+        case x if x.startsWith("--config=") =>
+          configfiles += x.stripPrefix("--config=")
+          i += 1
+        case x if x.startsWith("--launcher-config=") =>
+          configfiles += x.stripPrefix("--launcher-config=")
+          i += 1
+        case x =>
+          out += x
+          i += 1
+      }
+    }
+    (configfiles.result(), out.result())
   }
 
   private def _dev_paths(

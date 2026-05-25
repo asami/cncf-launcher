@@ -45,7 +45,7 @@ Dependency components are separate from the main target. Use
 source-level debugging of dependencies that are also under local development.
 For the normal dependency-component development loop, run `sbt
 cozyPublishLocalCar` in the dependency component. This publishes the CAR,
-catalog, and metadata into `~/.cncf/repository`, and the `cncf` launcher passes
+catalog, and metadata into `~/.cncf/local`, and the `cncf` launcher passes
 that local repository to the runtime before public repositories. Dependencies
 without source overrides are resolved by the CNCF runtime from configured
 component repositories. `textus server <artifact>` is the CAR/SAR artifact
@@ -95,14 +95,17 @@ repositories:
 The default CAR/SAR repository order is:
 
 1. CLI/config explicit repositories
-2. `~/.cncf/repository/repository/car` and `~/.cncf/repository/repository/sar`
-3. runtime catalog repositories
-4. built-in SimpleModeling.org repositories
+2. `~/.cncf/local/repository/car` and `~/.cncf/local/repository/sar`
+3. `~/.cncf/cache/car` and `~/.cncf/cache/sar`
+4. runtime catalog repositories
+5. built-in SimpleModeling.org repositories
 
-`~/.cncf/repository` is local publish state produced by
-`sbt cozyPublishLocalCar` / `sbt cozyPublishLocalSar`. `~/.cncf/cache` is remote
-artifact cache and can be deleted without removing locally published
-development artifacts.
+`~/.cncf/local` is developer-owned local publish state produced by
+`sbt cozyPublishLocalCar` / `sbt cozyPublishLocalSar`. `~/.cncf/cache` is
+runtime-managed remote artifact cache and can be deleted without removing
+locally published development artifacts. Snapshot components are local-only by
+default; if a snapshot is missing, publish it locally instead of expecting
+public/cache lookup.
 
 `.cozy/config.yaml` belongs to build/publish operation defaults.
 `.cncf/config.yaml` belongs to runtime lookup and development startup.

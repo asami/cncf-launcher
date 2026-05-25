@@ -15,6 +15,8 @@ object CncfLauncherSpec {
     spec.parser()
     spec.launcherVersion()
     spec.configMerge()
+    spec.configFileOptionOverridesProjectConfig()
+    spec.configFileOptionRequiresExistingFile()
     spec.runtimeVersionPrecedence()
     spec.runtimeUseWritesExpectedFiles()
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
@@ -36,6 +38,7 @@ object CncfLauncherSpec {
     spec.devServerProfileAddsLocalPersistentSqliteArgs()
     spec.devConfigCanSelectExecutionProfile()
     spec.devServerUsesRuntimeDevelopmentDirectory()
+    spec.devServerUsesRuntimeDevelopmentCatalogForSelection()
     spec.devCommandPassesRuntimeLeadingArgs()
     spec.devCommandKeepsSampleMainClassValueAsRuntimeArg()
     spec.devCommandCanDisableProjectClasspath()
@@ -125,7 +128,48 @@ final class CncfLauncherSpec {
     assert(config.sarRepositories.head == "https://global.example/sar")
     assert(config.carRepositories.contains(paths.localCarRepository.toString))
     assert(config.sarRepositories.contains(paths.localSarRepository.toString))
+    assert(config.carRepositories.contains(paths.cacheCarRepository.toString))
+    assert(config.sarRepositories.contains(paths.cacheSarRepository.toString))
     assert(config.carRepositories.contains("https://www.simplemodeling.org/repository/car"))
+  }
+
+  def configFileOptionOverridesProjectConfig(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      """runtime:
+        |  version: 0.1.0
+        |dev:
+        |  port: 19500
+        |""".stripMargin)
+    _write(paths.cwd.resolve("etc").resolve("debug.conf"),
+      """runtime.version = 0.2.0
+        |dev.port = 19600
+        |""".stripMargin)
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    launcher.run(Vector("--config", "etc/debug.conf", "dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
+    assert(!invoker.lastArgs.contains("--config"))
+    assert(!invoker.lastArgs.contains("etc/debug.conf"))
+  }
+
+  def configFileOptionRequiresExistingFile(): Unit = _with_temp_paths { paths =>
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    val failed =
+      try {
+        launcher.run(Vector("--config", "etc/missing.conf", "runtime", "config", "show"))
+        false
+      } catch {
+        case e: CncfException =>
+          e.getMessage.contains("launcher config file not found") &&
+            e.getMessage.contains("etc/missing.conf")
+      }
+    assert(failed)
   }
 
   def runtimeVersionPrecedence(): Unit = _with_temp_paths { paths =>
@@ -529,6 +573,27 @@ final class CncfLauncherSpec {
     assert(invoker.lastClasspath.contains(appclassdir))
   }
 
+  def devServerUsesRuntimeDevelopmentCatalogForSelection(): Unit = _with_temp_paths { paths =>
+    val appclassdir = paths.cwd.resolve("target").resolve("scala-3.3.7").resolve("classes")
+    val runtimeproject = paths.cwd.resolve("cncf-runtime")
+    val runtimeclassdir = runtimeproject.resolve("target").resolve("scala-3.3.7").resolve("classes")
+    Files.createDirectories(appclassdir)
+    Files.createDirectories(runtimeclassdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), appclassdir.toString)
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.4.10-SNAPSHOT", Vector("0.4.10-SNAPSHOT")))
+    _write(runtimeproject.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), runtimeclassdir.toString)
+    _write(runtimeproject.resolve("target").resolve("cncf.d").resolve("runtime-catalog.yaml"), _runtime_dev_catalog_text)
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    launcher.run(Vector("--runtime", "0.4.10-SNAPSHOT", "dev", "server", "--runtime-dev-dir", "cncf-runtime"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector.empty)
+    assert(invoker.lastClasspath.contains(runtimeclassdir))
+    assert(invoker.lastClasspath.contains(appclassdir))
+  }
+
   def devCommandPassesRuntimeLeadingArgs(): Unit = _with_temp_paths { paths =>
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
@@ -653,7 +718,8 @@ final class CncfLauncherSpec {
     assert(help.contains("repositoryLookup=disabled"))
     assert(help.contains("--component-dev-dir <dir> is a dependency component local override"))
     assert(help.contains("cozyPublishLocalCar"))
-    assert(help.contains("~/.cncf/repository is local publish state"))
+    assert(help.contains("~/.cncf/local is developer local publish state"))
+    assert(help.contains("Snapshot components are local-only"))
     assert(help.contains("cncf dev stop"))
     assert(help.contains("--stop-existing"))
     assert(help.contains("dev-server.pid"))
@@ -672,6 +738,8 @@ final class CncfLauncherSpec {
     assert(output.contains("dependency-components local dev overrides"))
     assert(output.contains("local-repository"))
     assert(output.contains(paths.localRepository.toString))
+    assert(output.contains("cache-repository"))
+    assert(output.contains("status=not-created"))
     assert(output.contains("web-descriptor-source none; use src/main/web-inf/web.yaml|form.yaml|admin.yaml"))
   }
 
@@ -1039,6 +1107,31 @@ final class CncfLauncherSpec {
       |    scalaBinaryVersion: "3"
       |    module: org.goldenport:goldenport-cncf_3:0.3.0-SNAPSHOT
       |    publishedAt: 2026-05-17T02:00:00Z
+      |""".stripMargin
+
+  private val _runtime_dev_catalog_text: String =
+    """schemaVersion: 1
+      |generatedAt: 2026-05-25T00:00:00Z
+      |recommended: 0.4.9
+      |latestStable: 0.4.9
+      |latestSnapshot: 0.4.10-SNAPSHOT
+      |mavenRepositories:
+      |  - https://repo.example/maven
+      |baseProvided:
+      |  - org.goldenport:goldenport-cncf_3
+      |versions:
+      |  - version: 0.4.9
+      |    channel: stable
+      |    status: active
+      |    scalaBinaryVersion: "3"
+      |    module: org.goldenport:goldenport-cncf_3:0.4.9
+      |    publishedAt: 2026-05-24T01:00:00Z
+      |  - version: 0.4.10-SNAPSHOT
+      |    channel: snapshot
+      |    status: active
+      |    scalaBinaryVersion: "3"
+      |    module: org.goldenport:goldenport-cncf_3:0.4.10-SNAPSHOT
+      |    publishedAt: 2026-05-25T01:00:00Z
       |""".stripMargin
 
   private def _project_yaml(

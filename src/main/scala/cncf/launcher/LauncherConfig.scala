@@ -5,7 +5,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 24, 2026
+ * @version May. 25, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
@@ -45,8 +45,8 @@ final case class LauncherConfig(
 
   def normalizedWithDefaults(paths: LauncherPaths): LauncherConfig =
     copy(
-      carRepositories = _append_defaults(carRepositories, LauncherConfig.localCarRepositories(paths) ++ LauncherConfig.DEFAULT_CAR_REPOSITORIES),
-      sarRepositories = _append_defaults(sarRepositories, LauncherConfig.localSarRepositories(paths) ++ LauncherConfig.DEFAULT_SAR_REPOSITORIES),
+      carRepositories = _append_defaults(carRepositories, LauncherConfig.localCarRepositories(paths) ++ LauncherConfig.cacheCarRepositories(paths) ++ LauncherConfig.DEFAULT_CAR_REPOSITORIES),
+      sarRepositories = _append_defaults(sarRepositories, LauncherConfig.localSarRepositories(paths) ++ LauncherConfig.cacheSarRepositories(paths) ++ LauncherConfig.DEFAULT_SAR_REPOSITORIES),
       mavenRepositories = _append_defaults(mavenRepositories, LauncherConfig.DEFAULT_MAVEN_REPOSITORIES),
       runtimeSelectionPolicy = runtimeSelectionPolicy.orElse(Some(RuntimeSelectionPolicy.CurrentCompatible)),
       runtimeNoCompatiblePolicy = runtimeNoCompatiblePolicy.orElse(Some(RuntimeNoCompatiblePolicy.Error)),
@@ -91,13 +91,22 @@ object LauncherConfig {
   val DEFAULT_SAR_REPOSITORIES = Vector("https://www.simplemodeling.org/repository/sar")
   val DEFAULT_MAVEN_REPOSITORIES = Vector("https://www.simplemodeling.org/repository/maven")
 
-  def load(paths: LauncherPaths): LauncherConfig = {
+  def load(paths: LauncherPaths): LauncherConfig =
+    load(paths, Vector.empty)
+
+  def load(
+    paths: LauncherPaths,
+    configfiles: Vector[String]
+  ): LauncherConfig = {
     val global = loadFile(paths.globalConfig)
     val project = loadFile(paths.projectConfig)
-    LauncherConfig()
+    val base = LauncherConfig()
       .mergeHigher(global)
       .mergeHigher(project)
-      .normalizedWithDefaults(paths)
+    val explicit = configfiles.foldLeft(base) { (acc, file) =>
+      acc.mergeHigher(loadRequiredFile(paths.cwd.resolve(file).normalize.toAbsolutePath.normalize))
+    }
+    explicit.normalizedWithDefaults(paths)
   }
 
   def loadFile(path: Path): LauncherConfig =
@@ -107,6 +116,12 @@ object LauncherConfig {
     } else {
       LauncherConfig()
     }
+
+  def loadRequiredFile(path: Path): LauncherConfig =
+    if (Files.isRegularFile(path))
+      loadFile(path)
+    else
+      throw CncfException(s"launcher config file not found: ${path}")
 
   def fromParsed(values: Map[String, Vector[String]]): LauncherConfig = {
     def _first_(keys: String*): Option[String] =
@@ -140,6 +155,12 @@ object LauncherConfig {
   def localSarRepositories(paths: LauncherPaths): Vector[String] =
     Vector(paths.localSarRepository.toString)
 
+  def cacheCarRepositories(paths: LauncherPaths): Vector[String] =
+    Vector(paths.cacheCarRepository.toString)
+
+  def cacheSarRepositories(paths: LauncherPaths): Vector[String] =
+    Vector(paths.cacheSarRepository.toString)
+
   def render(config: LauncherConfig): String = {
     val c =
       if (_has_local_repository(config))
@@ -156,9 +177,13 @@ object LauncherConfig {
     val mavens = c.mavenRepositories.mkString(", ")
     val coursiers = c.coursierRepositories.mkString(", ")
     val localrepository =
-      c.carRepositories.find(_.contains("/.cncf/repository/repository/car")).
+      c.carRepositories.find(_.contains("/.cncf/local/repository/car")).
         map(_.stripSuffix("/repository/car")).
-        getOrElse("~/.cncf/repository")
+        getOrElse("~/.cncf/local")
+    val cacherepository =
+      c.carRepositories.find(_.contains("/.cncf/cache/car")).
+        map(_.stripSuffix("/car")).
+        getOrElse("~/.cncf/cache")
     val devproject = c.devProject.getOrElse("(not configured)")
     val devprofile = c.devExecutionProfile.map(_.name).getOrElse("(not configured)")
     val devport = c.devPort.getOrElse(LauncherConfig.DEFAULT_DEV_PORT)
@@ -173,7 +198,8 @@ object LauncherConfig {
        |dev.port: $devport
        |dev.componentDevDirs: $devdirs
        |local.repository: $localrepository
-       |local.repository.note: local CAR/SAR publish target; ~/.cncf/cache is remote artifact cache
+       |cache.repository: $cacherepository
+       |local.repository.note: ~/.cncf/local is developer local publish state; ~/.cncf/cache is runtime-managed remote artifact cache
        |repositories.car: $cars
        |repositories.sar: $sars
        |repositories.maven: $mavens
@@ -181,7 +207,7 @@ object LauncherConfig {
   }
 
   private def _has_local_repository(config: LauncherConfig): Boolean =
-    (config.carRepositories ++ config.sarRepositories).exists(_.contains("/.cncf/repository/repository/"))
+    (config.carRepositories ++ config.sarRepositories).exists(_.contains("/.cncf/local/repository/"))
 }
 
 object SimpleYaml {
@@ -206,7 +232,7 @@ object SimpleYaml {
         if (trimmed.startsWith("- ")) {
           pendingkey.foreach(k => _put_(k, trimmed.drop(2)))
         } else {
-          val idx = trimmed.indexOf(':')
+          val idx = _key_value_index(trimmed)
           if (idx >= 0) {
             val key = trimmed.substring(0, idx).trim
             val value = trimmed.substring(idx + 1).trim
@@ -229,6 +255,17 @@ object SimpleYaml {
   private def _strip_comment(s: String): String = {
     val idx = s.indexOf('#')
     if (idx < 0) s else s.substring(0, idx)
+  }
+
+  private def _key_value_index(s: String): Int = {
+    val colon = s.indexOf(':')
+    val equals = s.indexOf('=')
+    (colon, equals) match {
+      case (-1, -1) => -1
+      case (-1, x) => x
+      case (x, -1) => x
+      case (x, y) => math.min(x, y)
+    }
   }
 
   private def _unquote(s: String): String =

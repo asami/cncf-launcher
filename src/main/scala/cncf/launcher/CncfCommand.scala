@@ -401,6 +401,7 @@ object CncfCommandParser {
       |  cncf --version
       |  cncf version
       |  cncf launcher version
+      |  cncf --config etc/debug.conf dev server
       |  cncf dev classpath [--project <dir>]
       |  cncf dev check [--project <dir>] [--runtime-dev-dir <dir>]
       |  cncf dev server [--project <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--stop-existing|--restart] [--force-existing] [--profile local-persistent] [--project-activation auto|none|dev-dir|component-dir] [--component-dev-dir <dir>...] [runtime args...]
@@ -430,6 +431,8 @@ object CncfCommandParser {
       |  --runtime-selection=current-compatible|tested-latest|latest-compatible|newest-compatible selects the compatible runtime preference.
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
+      |  --config <file> loads an additional launcher config file; CLI config wins over global/project config.
+      |  Config files may use YAML-style nesting or dotted key assignments such as runtime.devDir = ../cncf.
       |  Runtime args before server/client/command are forwarded to CncfMain.
       |  --profile local-persistent configures target/cncf.d/runtime.sqlite as the local SQLite DataStore for development checks.
       |
@@ -446,9 +449,10 @@ object CncfCommandParser {
       |  The same profile can be configured as dev.profile: local-persistent in .cncf/config.yaml.
       |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.
       |  Dependency components without local overrides are resolved by CNCF component repositories at runtime.
-      |  The default local component repository is ~/.cncf/repository/repository/car and ~/.cncf/repository/repository/sar.
+      |  The default local component repository is ~/.cncf/local/repository/car and ~/.cncf/local/repository/sar.
       |  Publish dependency components there with sbt cozyPublishLocalCar or sbt cozyPublishLocalSar.
-      |  ~/.cncf/repository is local publish state; ~/.cncf/cache is remote artifact cache.
+      |  ~/.cncf/local is developer local publish state; ~/.cncf/cache is runtime-managed remote artifact cache.
+      |  Snapshot components are local-only by default; missing snapshots should be published with sbt cozyPublishLocalCar.
       |  Web app source lives under src/main/web; descriptor source metadata lives under src/main/web-inf.
       |  src/main/web/WEB-INF is for private Web resources, not generated descriptor source.
       |  textus server <artifact> is the CAR/SAR artifact launcher for repository-based application startup.

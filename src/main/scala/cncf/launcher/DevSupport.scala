@@ -131,7 +131,10 @@ final class DevSupport(
       DevCheckItem.ok("dependency-components", "local dev overrides from --component-dev-dir/.cncf config; otherwise resolved by CNCF component repositories"),
       _check_local_repository(paths.localRepository),
       _check_local_repository(paths.localCarRepository),
-      _check_local_repository(paths.localSarRepository)
+      _check_local_repository(paths.localSarRepository),
+      _check_cache_repository(paths.cacheRepository),
+      _check_cache_repository(paths.cacheCarRepository),
+      _check_cache_repository(paths.cacheSarRepository)
     )
     val runtimerequirements =
       if (context.runtimeRequirements.isEmpty)
@@ -369,7 +372,13 @@ final class DevSupport(
     if (Files.isDirectory(path))
       DevCheckItem.ok("local-repository", s"path=${path} exists=true")
     else
-      DevCheckItem.warning("local-repository", s"path=${path} exists=false; run sbt cozyPublishLocalCar in dependency components")
+      DevCheckItem.ok("local-repository", s"path=${path} status=not-created; run sbt cozyPublishLocalCar when a local dependency component is needed")
+
+  private def _check_cache_repository(path: Path): DevCheckItem =
+    if (Files.isDirectory(path))
+      DevCheckItem.ok("cache-repository", s"path=${path} exists=true")
+    else
+      DevCheckItem.ok("cache-repository", s"path=${path} status=not-created")
 
   private def _check_dev_server(context: DevContext): Vector[DevCheckItem] = {
     val pidfile = DevSupport.devServerPidFile(context.project)

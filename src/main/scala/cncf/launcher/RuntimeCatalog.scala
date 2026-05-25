@@ -7,7 +7,7 @@ import scala.util.Using
 
 /*
  * @since   May. 17, 2026
- * @version May. 22, 2026
+ * @version May. 25, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class RuntimeCatalog(
@@ -287,4 +287,18 @@ final class RuntimeCatalogStore(paths: LauncherPaths) {
     } else {
       Files.readString(Path.of(value), StandardCharsets.UTF_8)
     }
+}
+
+object RuntimeCatalogStore {
+  def loadRuntimeDevelopmentCatalog(runtimeproject: Path): Option[RuntimeCatalog] = {
+    val file = runtimeproject
+      .resolve("target")
+      .resolve("cncf.d")
+      .resolve("runtime-catalog.yaml")
+      .normalize
+    if (Files.isRegularFile(file))
+      Some(RuntimeCatalog.parse(Files.readString(file, StandardCharsets.UTF_8)))
+    else
+      None
+  }
 }
