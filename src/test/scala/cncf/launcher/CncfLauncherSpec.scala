@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version May. 26, 2026
+ * @version May. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -17,7 +17,9 @@ object CncfLauncherSpec {
     spec.configMerge()
     spec.configSupportsAdditionalRdfNamespaces()
     spec.configFileOptionOverridesProjectConfig()
+    spec.launcherConfigSupportsPropertiesAndConfFiles()
     spec.configFileProjectDevSurvivesTargetCwdSwitch()
+    spec.cncfConfigOptionIsForwardedToRuntime()
     spec.configFileOptionRequiresExistingFile()
     spec.runtimeVersionPrecedence()
     spec.runtimeUseWritesExpectedFiles()
@@ -93,7 +95,7 @@ final class CncfLauncherSpec {
   }
 
   def configMerge(): Unit = _with_temp_paths { paths =>
-    _write(paths.cncfHome.resolve("config.yaml"),
+    _write(paths.cncfHome.resolve("launcher.yaml"),
       """runtime:
         |  version: 0.1.0
         |  devDir: ../global-cncf
@@ -109,7 +111,7 @@ final class CncfLauncherSpec {
         |  sar:
         |    - https://global.example/sar
         |""".stripMargin)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       """runtime:
         |  version: 0.2.0
         |  devDir: ../project-cncf
@@ -142,7 +144,7 @@ final class CncfLauncherSpec {
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  version: 0.5.0
          |  catalog:
@@ -177,25 +179,50 @@ final class CncfLauncherSpec {
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       """runtime:
         |  version: 0.1.0
         |dev:
         |  port: 19500
         |""".stripMargin)
-    _write(paths.cwd.resolve("etc").resolve("debug.conf"),
-      """runtime.version = 0.2.0
-        |dev.port = 19600
+    _write(paths.cwd.resolve("etc").resolve("debug.yaml"),
+      """runtime:
+        |  version: 0.2.0
+        |dev:
+        |  port: 19600
         |""".stripMargin)
     val resolver = FakeResolver()
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, resolver, invoker)
 
-    launcher.run(Vector("--config", "etc/debug.conf", "dev", "server"))
+    launcher.run(Vector("--config", "etc/debug.yaml", "dev", "server"))
 
     _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
     assert(!invoker.lastArgs.contains("--config"))
-    assert(!invoker.lastArgs.contains("etc/debug.conf"))
+    assert(!invoker.lastArgs.contains("etc/debug.yaml"))
+  }
+
+  def launcherConfigSupportsPropertiesAndConfFiles(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("etc").resolve("launcher.properties"),
+      """runtime.version = 0.2.0
+        |dev.port = 19601
+        |""".stripMargin)
+    _write(paths.cwd.resolve("etc").resolve("launcher.conf"),
+      """dev.restart = true
+        |cncf.config.file = etc/runtime-debug.yaml
+        |""".stripMargin)
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    launcher.run(Vector("--config", "etc/launcher.properties", "--config", "etc/launcher.conf", "dev", "server"))
+
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
+    assert(invoker.lastArgs.exists(_.startsWith("--cncf.config.files=")))
+    assert(invoker.lastArgs.exists(_.contains("runtime-debug.yaml")))
   }
 
   def configFileProjectDevSurvivesTargetCwdSwitch(): Unit = _with_temp_paths { paths =>
@@ -203,19 +230,42 @@ final class CncfLauncherSpec {
     val classdir = project.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(project.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve("etc").resolve("debug.conf"),
-      """runtime.version = 0.2.0
-        |dev.project-dev = blog
-        |dev.restart = true
+    _write(paths.cwd.resolve("etc").resolve("debug.yaml"),
+      """runtime:
+        |  version: 0.2.0
+        |dev:
+        |  project-dev: blog
+        |  restart: true
         |""".stripMargin)
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
 
-    launcher.run(Vector("--config", "etc/debug.conf", "dev", "server"))
+    launcher.run(Vector("--config", "etc/debug.yaml", "dev", "server"))
 
     assert(invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString))
     assert(!invoker.lastArgs.contains("--config"))
-    assert(!invoker.lastArgs.contains("etc/debug.conf"))
+    assert(!invoker.lastArgs.contains("etc/debug.yaml"))
+  }
+
+  def cncfConfigOptionIsForwardedToRuntime(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve("etc").resolve("runtime-debug.yaml"),
+      """textus:
+        |  knowledge:
+        |    rdf:
+        |      current-prefix: sm
+        |""".stripMargin)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("--cncf-config", "etc/runtime-debug.yaml", "dev", "server"))
+
+    assert(invoker.lastArgs.exists(_.startsWith("--cncf.config.files=")))
+    assert(invoker.lastArgs.exists(_.contains("runtime-debug.yaml")))
+    assert(!invoker.lastArgs.contains("--cncf-config"))
+    assert(!invoker.lastArgs.contains("etc/runtime-debug.yaml"))
   }
 
   def configFileOptionRequiresExistingFile(): Unit = _with_temp_paths { paths =>
@@ -282,7 +332,7 @@ final class CncfLauncherSpec {
   def runtimeCatalogCommands(): Unit = _with_temp_paths { paths =>
     val catalogfile = paths.cwd.resolve("runtime-catalog.yaml")
     _write(catalogfile, _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: $catalogfile
@@ -301,7 +351,7 @@ final class CncfLauncherSpec {
   def runtimeDescriptorCommands(): Unit = _with_temp_paths { paths =>
     val catalogfile = paths.cwd.resolve("runtime-catalog.yaml")
     _write(catalogfile, _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: $catalogfile
@@ -340,7 +390,7 @@ final class CncfLauncherSpec {
         |  - org.typelevel:spire_3
         |""".stripMargin
     )
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: $catalogfile
@@ -420,7 +470,7 @@ final class CncfLauncherSpec {
     val classdir = paths.cwd.resolve("target").resolve("scala-3.3.7").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  version: 0.5.0
          |  catalog:
@@ -603,7 +653,7 @@ final class CncfLauncherSpec {
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       """dev:
         |  profile: local-persistent
         |""".stripMargin)
@@ -787,7 +837,7 @@ final class CncfLauncherSpec {
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  version: 0.5.0
          |  catalog:
@@ -805,7 +855,7 @@ final class CncfLauncherSpec {
     val classdir = project.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(project.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(project.resolve(".cncf").resolve("config.yaml"),
+    _write(project.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  version: 0.5.0
          |  catalog:
@@ -935,7 +985,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0", "0.3.0-SNAPSHOT")))
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -954,7 +1004,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0", "0.3.0-SNAPSHOT")))
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -973,7 +1023,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0")))
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -992,7 +1042,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0")))
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -1020,7 +1070,7 @@ final class CncfLauncherSpec {
         |        tested: [0.3.0-SNAPSHOT]
         |""".stripMargin)
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -1043,7 +1093,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0", "0.3.0-SNAPSHOT")))
     _write(account.resolve("project.yaml"), _project_yaml("0.2.0", Vector("0.2.0")))
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -1065,7 +1115,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     _write(paths.cwd.resolve("project.yaml"), _project_yaml("9.0.0", Vector("9.0.0")))
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -1087,7 +1137,7 @@ final class CncfLauncherSpec {
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     _write(paths.cwd.resolve("project.yaml"), _project_yaml("9.0.0", Vector("9.0.0")))
     _write(paths.cwd.resolve("runtime-catalog.yaml"), _catalog_text)
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  catalog:
          |    url: ${paths.cwd.resolve("runtime-catalog.yaml")}
@@ -1101,7 +1151,7 @@ final class CncfLauncherSpec {
   }
 
   def runtimeCommandDoesNotLoadCncf(): Unit = _with_temp_paths { paths =>
-    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"), "runtime:\n  version: 0.5.0\n")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"), "runtime:\n  version: 0.5.0\n")
     val resolver = FakeResolver()
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, resolver, invoker)

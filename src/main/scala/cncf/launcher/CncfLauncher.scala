@@ -7,7 +7,7 @@ import scala.util.Try
 
 /*
  * @since   May. 17, 2026
- * @version May. 26, 2026
+ * @version May. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -18,8 +18,9 @@ final class CncfLauncher(
   processmanager: DevServerProcessManager = DevServerProcessManager.System
 ) {
   def run(args: Vector[String]): Int = {
-    val (configfiles, commandargs) = _take_config_options(args)
+    val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
     val config = LauncherConfig.load(paths, configfiles)
+      .mergeHigher(LauncherConfig(cncfConfigFiles = cncfconfigfiles))
     val command = CncfCommandParser.parse(commandargs)
     command match {
       case CncfCommand.Version =>
@@ -31,7 +32,7 @@ final class CncfLauncher(
       case runtime: CncfCommand.Runtime =>
         _run_runtime(runtime, config)
       case dev: CncfCommand.Dev =>
-        _run_dev(dev, configfiles)
+        _run_dev(dev, configfiles, cncfconfigfiles)
     }
   }
 
@@ -194,16 +195,18 @@ final class CncfLauncher(
 
   private def _run_dev(
     command: CncfCommand.Dev,
-    configfiles: Vector[String]
+    configfiles: Vector[String],
+    cncfconfigfiles: Vector[String]
   ): Int = {
-    val initialconfig = LauncherConfig.load(paths, configfiles)
+    val explicitconfig = LauncherConfig(cncfConfigFiles = cncfconfigfiles)
+    val initialconfig = LauncherConfig.load(paths, configfiles).mergeHigher(explicitconfig)
     val initialoptions = command.options.copy(target = _config_dev_target(command.options.target, initialconfig))
     val effectivepaths = _dev_paths(initialoptions)
     val config =
       if (effectivepaths.cwd == paths.cwd)
         initialconfig
       else
-        LauncherConfig.load(effectivepaths, configfiles)
+        LauncherConfig.load(effectivepaths, configfiles).mergeHigher(explicitconfig)
     val store = RuntimeVersionStore(effectivepaths)
     val basecatalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
     val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
@@ -260,8 +263,9 @@ final class CncfLauncher(
 
   private def _take_config_options(
     args: Vector[String]
-  ): (Vector[String], Vector[String]) = {
+  ): (Vector[String], Vector[String], Vector[String]) = {
     val configfiles = Vector.newBuilder[String]
+    val cncfconfigfiles = Vector.newBuilder[String]
     val out = Vector.newBuilder[String]
     var i = 0
     while (i < args.length) {
@@ -280,12 +284,20 @@ final class CncfLauncher(
         case x if x.startsWith("--launcher-config=") =>
           configfiles += _config_file(x.stripPrefix("--launcher-config="))
           i += 1
+        case "--cncf-config" =>
+          if (i + 1 >= args.length)
+            throw CncfException(s"${args(i)} requires a value")
+          cncfconfigfiles += _config_file(args(i + 1))
+          i += 2
+        case x if x.startsWith("--cncf-config=") =>
+          cncfconfigfiles += _config_file(x.stripPrefix("--cncf-config="))
+          i += 1
         case x =>
           out += x
           i += 1
       }
     }
-    (configfiles.result(), out.result())
+    (configfiles.result(), cncfconfigfiles.result(), out.result())
   }
 
   private def _config_file(path: String): String =
@@ -336,7 +348,7 @@ final class CncfLauncher(
     }
     val devclasspath = devsupport.runtimeClasspath(context)
     val cncfargs =
-      devsupport.cncfArgs(context.copy(runtimeArgs = context.runtimeArgs ++ _textus_knowledge_rdf_args(config)), mode, args)
+      devsupport.cncfArgs(context.copy(runtimeArgs = context.runtimeArgs ++ _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config)), mode, args)
     _with_dev_system_properties(context) {
       cncfinvoker.invoke(runtimeclasspath ++ devclasspath, cncfargs)
     }
@@ -373,6 +385,14 @@ final class CncfLauncher(
       config.textusKnowledgeRdfNamespaces.map { case (prefix, namespaceuri) =>
         s"--textus.knowledge.rdf.namespaces.${prefix}=${namespaceuri}"
       }
+
+  private def _cncf_config_args(
+    config: LauncherConfig
+  ): Vector[String] =
+    if (config.cncfConfigFiles.isEmpty)
+      Vector.empty
+    else
+      Vector(s"--cncf.config.files=${config.cncfConfigFiles.distinct.mkString(",")}")
 }
 
 object CncfLauncher {

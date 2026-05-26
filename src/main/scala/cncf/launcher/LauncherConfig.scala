@@ -5,7 +5,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 26, 2026
+ * @version May. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
@@ -19,6 +19,7 @@ final case class LauncherConfig(
   devPort: Option[String] = None,
   devRestart: Option[Boolean] = None,
   devForceExisting: Option[Boolean] = None,
+  cncfConfigFiles: Vector[String] = Vector.empty,
   textusKnowledgeRdfNodePrefix: Option[String] = None,
   textusKnowledgeRdfPublicBaseUri: Option[String] = None,
   textusKnowledgeRdfNamespacePrefixes: Option[String] = None,
@@ -41,6 +42,7 @@ final case class LauncherConfig(
       devPort = higher.devPort.orElse(devPort),
       devRestart = higher.devRestart.orElse(devRestart),
       devForceExisting = higher.devForceExisting.orElse(devForceExisting),
+      cncfConfigFiles = _merge_list(cncfConfigFiles, higher.cncfConfigFiles),
       textusKnowledgeRdfNodePrefix = higher.textusKnowledgeRdfNodePrefix.orElse(textusKnowledgeRdfNodePrefix),
       textusKnowledgeRdfPublicBaseUri = higher.textusKnowledgeRdfPublicBaseUri.orElse(textusKnowledgeRdfPublicBaseUri),
       textusKnowledgeRdfNamespacePrefixes = higher.textusKnowledgeRdfNamespacePrefixes.orElse(textusKnowledgeRdfNamespacePrefixes),
@@ -140,7 +142,7 @@ object LauncherConfig {
   def loadFile(path: Path): LauncherConfig =
     if (Files.isRegularFile(path)) {
       val text = Files.readString(path, StandardCharsets.UTF_8)
-      fromParsed(SimpleYaml.parse(text))
+      fromParsed(LauncherConfigParser.parse(path, text))
     } else {
       LauncherConfig()
     }
@@ -191,6 +193,7 @@ object LauncherConfig {
       devPort = _first_("dev.port", "cncf.dev.port"),
       devRestart = _boolean_("dev.restart", "cncf.dev.restart", "dev.stop-existing", "dev.stop_existing", "cncf.dev.stop-existing", "cncf.dev.stop_existing", "dev.stopExisting", "cncf.dev.stopExisting"),
       devForceExisting = _boolean_("dev.force-existing", "dev.force_existing", "cncf.dev.force-existing", "cncf.dev.force_existing", "dev.forceExisting", "cncf.dev.forceExisting"),
+      cncfConfigFiles = _cncf_config_files(values),
       textusKnowledgeRdfNodePrefix = _first_("textus.knowledge.rdf.current-prefix", "textus.knowledge.rdf.current_prefix", "textus.knowledge.rdf.currentPrefix", "textus.knowledge.rdf.node-prefix", "textus.knowledge.rdf.node_prefix", "textus.knowledge.rdf.nodePrefix", "textus.knowledge.rdf.prefix"),
       textusKnowledgeRdfPublicBaseUri = _first_("textus.knowledge.rdf.public-base-uri", "textus.knowledge.rdf.public_base_uri", "textus.knowledge.rdf.publicBaseUri", "textus.knowledge.rdf.public-base-url", "textus.knowledge.rdf.public_base_url", "textus.knowledge.rdf.publicBaseUrl"),
       textusKnowledgeRdfNamespacePrefixes = if (namespaceprefixes.isEmpty) None else Some(namespaceprefixes.mkString(",")),
@@ -202,6 +205,22 @@ object LauncherConfig {
       coursierRepositories = _all_("repositories.coursier", "cncf.repository.coursier")
     )
   }
+
+  private def _cncf_config_files(
+    values: Map[String, Vector[String]]
+  ): Vector[String] =
+    _config_files(values, Vector(
+      "cncf.config.file",
+      "cncf.config.files"
+    ))
+
+  private def _config_files(
+    values: Map[String, Vector[String]],
+    keys: Vector[String]
+  ): Vector[String] =
+    keys.flatMap(key =>
+      values.getOrElse(key, Vector.empty).flatMap(_.split(",").toVector)
+    ).map(_.trim).filter(_.nonEmpty).distinct
 
   private def _rdf_namespaces(
     values: Map[String, Vector[String]]
@@ -302,17 +321,52 @@ object LauncherConfig {
     (config.carRepositories ++ config.sarRepositories).exists(_.contains("/.cncf/local/repository/"))
 }
 
-object SimpleYaml {
-  def parse(text: String): Map[String, Vector[String]] = {
+object LauncherConfigParser {
+  def parse(
+    path: Path,
+    text: String
+  ): Map[String, Vector[String]] =
+    _file_type(path) match {
+      case "yaml" | "yml" => _parse_light_yaml(text)
+      case "properties" | "props" | "conf" => _parse_properties(text)
+      case other =>
+        throw CncfException(s"unsupported launcher config file type: .$other; use yaml, yml, properties, props, or conf")
+    }
+
+  private def _file_type(path: Path): String = {
+    val name = path.getFileName.toString
+    val i = name.lastIndexOf('.')
+    if (i >= 0 && i + 1 < name.length)
+      name.substring(i + 1).toLowerCase
+    else
+      "yaml"
+  }
+
+  private def _parse_properties(text: String): Map[String, Vector[String]] = {
+    var values = Map.empty[String, Vector[String]]
+    text.linesIterator.foreach { raw =>
+      val uncommented = _strip_comment(raw)
+      val trimmed = uncommented.trim
+      if (trimmed.nonEmpty) {
+        val idx = _key_value_index(trimmed)
+        if (idx >= 0) {
+          val key = trimmed.substring(0, idx).trim
+          val value = trimmed.substring(idx + 1).trim
+          _put_value(key, value, values).foreach(v => values = v)
+        }
+      }
+    }
+    values
+  }
+
+  private def _parse_light_yaml(text: String): Map[String, Vector[String]] = {
     val builder = Map.newBuilder[String, Vector[String]]
     var values = Map.empty[String, Vector[String]]
     var stack = Vector.empty[(Int, String)]
     var pendingkey: Option[String] = None
 
     def _put_(path: String, value: String): Unit = {
-      val clean = _unquote(value.trim)
-      if (clean.nonEmpty)
-        values = values.updated(path, values.getOrElse(path, Vector.empty) :+ clean)
+      _put_value(path, value, values).foreach(v => values = v)
     }
 
     text.linesIterator.foreach { raw =>
@@ -344,6 +398,19 @@ object SimpleYaml {
     builder.result()
   }
 
+  private def _put_value(
+    path: String,
+    value: String,
+    values: Map[String, Vector[String]]
+  ): Option[Map[String, Vector[String]]] = {
+    val key = path.trim
+    val clean = _unquote(value.trim)
+    if (key.nonEmpty && clean.nonEmpty)
+      Some(values.updated(key, values.getOrElse(key, Vector.empty) :+ clean))
+    else
+      None
+  }
+
   private def _strip_comment(s: String): String = {
     val idx = s.indexOf('#')
     if (idx < 0) s else s.substring(0, idx)
@@ -365,4 +432,9 @@ object SimpleYaml {
       s.substring(1, s.length - 1)
     else
       s
+}
+
+object SimpleYaml {
+  def parse(text: String): Map[String, Vector[String]] =
+    LauncherConfigParser.parse(Path.of("config.yaml"), text)
 }

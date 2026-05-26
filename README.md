@@ -50,7 +50,7 @@ fullClasspath`. Use `cncf dev classpath --project-dev <dir>` to prepare it
 manually.
 
 Dependency components are separate from the main target. Use
-`--component-dev-dir <dir>` or `.cncf/config.yaml` `dev.componentDevDirs` for
+`--component-dev-dir <dir>` or `.cncf/launcher.yaml` `dev.component-dev-dirs` for
 source-level debugging of dependencies that are also under local development.
 For the normal dependency-component development loop, run `sbt
 cozyPublishLocalCar` in the dependency component. This publishes the CAR,
@@ -69,30 +69,41 @@ Runtime arguments placed before the operation selector are forwarded before
 repository.d minimal.main.hello`. Use `--no-project-classpath` when invoking
 packaged CAR/SAR artifacts without the current project classpath.
 
-## Configuration
+## Launcher Configuration
 
-The launcher reads only:
+The `cncf` launcher reads launcher configuration from:
 
 ```text
-~/.cncf/config.yaml
-$PWD/.cncf/config.yaml
+~/.cncf/launcher.yaml
+$PWD/.cncf/launcher.yaml
 ```
 
-For `cncf dev ... --project-dev <dir>`, the project config is `<dir>/.cncf/config.yaml`.
+For `cncf dev ... --project-dev <dir>`, the project launcher config is
+`<dir>/.cncf/launcher.yaml`. Use `--config <file>` for an additional launcher
+config file, for example:
+
+```bash
+cncf --config etc/launcher/debug.yaml dev server
+```
+
+Launcher config is intentionally lightweight. It supports `yaml` / `yml`,
+`properties` / `props`, and lightweight `conf` files with dotted keys. JSON,
+XML, and full HOCON are CNCF runtime config formats, not launcher config
+formats.
 
 Example:
 
 ```yaml
 runtime:
   version: recommended
-  devDir: ../cncf
+  dev-dir: ../cncf
   catalog:
     url: https://www.simplemodeling.org/repository/textus/runtime-catalog.yaml
 
 dev:
-  project: .
+  project-dev: .
   port: 19532
-  componentDevDirs:
+  component-dev-dirs:
     - ../textus-user-account
     - ../textus-user-notification
 
@@ -100,6 +111,22 @@ repositories:
   maven:
     - https://www.simplemodeling.org/repository/maven
 ```
+
+## CNCF Runtime Configuration
+
+CNCF runtime configuration is separate from launcher configuration. Runtime
+configuration is read by the CNCF runtime after the launcher has selected and
+started it. Use `.cncf/config.yaml` / `.textus/config.yaml` for project runtime
+configuration, or pass an explicit runtime config file through the launcher:
+
+```bash
+cncf --config etc/launcher/debug.yaml --cncf-config etc/debug.yaml dev server
+```
+
+`--cncf-config <file>` is forwarded to the runtime as
+`--cncf.config.files=<file>`. The `cncf` command is a component-developer tool,
+so its explicit runtime-config option uses the `cncf` spelling. The user-facing
+`textus` launcher uses Textus-oriented configuration names.
 
 The default CAR/SAR repository order is:
 
@@ -121,7 +148,9 @@ Configure repositories explicitly or publish dependency components to
 `~/.cncf/local`.
 
 `.cozy/config.yaml` belongs to build/publish operation defaults.
-`.cncf/config.yaml` belongs to runtime lookup and development startup.
+`.cncf/launcher.yaml` belongs to the `cncf` launcher.
+`.cncf/config.yaml` and `.textus/config.yaml` belong to CNCF runtime
+configuration.
 `project.yaml` belongs to artifact metadata and runtime compatibility.
 
 `.textus/config.yaml` remains a CNCF runtime/project configuration file. It is

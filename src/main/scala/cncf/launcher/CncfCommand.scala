@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 26, 2026
+ * @version May. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -414,7 +414,7 @@ object CncfCommandParser {
       |  cncf --version
       |  cncf version
       |  cncf launcher version
-      |  cncf --config etc/debug.conf dev server
+      |  cncf --config etc/launcher/debug.yaml --cncf-config etc/debug.yaml dev server
       |  cncf dev classpath [--project-dev <dir>]
       |  cncf dev check [--project-dev <dir>] [--runtime-dev-dir <dir>]
       |  cncf dev server [--project-dev <dir>|--name <artifact>[:<version>]|--car-file <file>|--project-car <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--stop-existing|--restart] [--force-existing] [--profile local-persistent] [--component-dev-dir <dir>...] [runtime args...]
@@ -445,7 +445,10 @@ object CncfCommandParser {
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
       |  --config <file> loads an additional launcher config file; CLI config wins over global/project config.
-      |  Config files may use YAML-style nesting or dotted key assignments such as runtime.dev-dir = ../cncf.
+      |  --cncf-config <file> loads an additional CNCF runtime config file.
+      |  Launcher config files may use yaml/yml, properties, props, or lightweight conf.
+      |  Launcher conf/properties files support dotted key assignments such as runtime.dev-dir = ../cncf.
+      |  Full JSON/XML/HOCON are CNCF runtime config formats, not launcher config formats.
       |  Runtime args before server/client/command are forwarded to CncfMain.
       |  --profile local-persistent configures target/cncf.d/runtime.sqlite as the local SQLite DataStore for development checks.
       |  Config dev.project-dev is the configuration equivalent of --project-dev.
@@ -464,7 +467,9 @@ object CncfCommandParser {
       |  --force-existing permits force stop after graceful stop fails or ambiguous state overwrite.
       |  cncf dev stop stops the recorded dev server for the selected project and port without starting a new server.
       |  --profile local-persistent stores development DataStore state in target/cncf.d/runtime.sqlite.
-      |  The same profile can be configured as dev.profile: local-persistent in .cncf/config.yaml.
+      |  The same profile can be configured as dev.profile: local-persistent in .cncf/launcher.yaml.
+      |  Launcher settings live in ~/.cncf/launcher.yaml and .cncf/launcher.yaml.
+      |  CNCF runtime settings live in ~/.cncf/config.yaml and .cncf/config.yaml.
       |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.
       |  Dependency components without local overrides are resolved by CNCF component repositories at runtime.
       |  The default local component repository is ~/.cncf/local/repository/car and ~/.cncf/local/repository/sar.
