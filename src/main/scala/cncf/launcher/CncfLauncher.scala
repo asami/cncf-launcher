@@ -335,7 +335,8 @@ final class CncfLauncher(
       case None => runtimeresolver.resolve(context.runtimeVersion, config, effectivepaths)
     }
     val devclasspath = devsupport.runtimeClasspath(context)
-    val cncfargs = devsupport.cncfArgs(context, mode, args)
+    val cncfargs =
+      devsupport.cncfArgs(context.copy(runtimeArgs = context.runtimeArgs ++ _textus_knowledge_rdf_args(config)), mode, args)
     _with_dev_system_properties(context) {
       cncfinvoker.invoke(runtimeclasspath ++ devclasspath, cncfargs)
     }
@@ -362,6 +363,16 @@ final class CncfLauncher(
       }
     }
   }
+
+  private def _textus_knowledge_rdf_args(
+    config: LauncherConfig
+  ): Vector[String] =
+    config.textusKnowledgeRdfNodePrefix.toVector.map("--textus.knowledge.rdf.node-prefix=" + _) ++
+      config.textusKnowledgeRdfPublicBaseUri.toVector.map("--textus.knowledge.rdf.public-base-uri=" + _) ++
+      config.textusKnowledgeRdfNamespacePrefixes.toVector.map("--textus.knowledge.rdf.namespace-prefixes=" + _) ++
+      config.textusKnowledgeRdfNamespaces.map { case (prefix, namespaceuri) =>
+        s"--textus.knowledge.rdf.namespaces.${prefix}=${namespaceuri}"
+      }
 }
 
 object CncfLauncher {

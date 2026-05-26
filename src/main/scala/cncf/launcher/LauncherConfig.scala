@@ -19,6 +19,10 @@ final case class LauncherConfig(
   devPort: Option[String] = None,
   devRestart: Option[Boolean] = None,
   devForceExisting: Option[Boolean] = None,
+  textusKnowledgeRdfNodePrefix: Option[String] = None,
+  textusKnowledgeRdfPublicBaseUri: Option[String] = None,
+  textusKnowledgeRdfNamespacePrefixes: Option[String] = None,
+  textusKnowledgeRdfNamespaces: Vector[(String, String)] = Vector.empty,
   devComponentDevDirs: Vector[String] = Vector.empty,
   carRepositories: Vector[String] = Vector.empty,
   sarRepositories: Vector[String] = Vector.empty,
@@ -37,6 +41,10 @@ final case class LauncherConfig(
       devPort = higher.devPort.orElse(devPort),
       devRestart = higher.devRestart.orElse(devRestart),
       devForceExisting = higher.devForceExisting.orElse(devForceExisting),
+      textusKnowledgeRdfNodePrefix = higher.textusKnowledgeRdfNodePrefix.orElse(textusKnowledgeRdfNodePrefix),
+      textusKnowledgeRdfPublicBaseUri = higher.textusKnowledgeRdfPublicBaseUri.orElse(textusKnowledgeRdfPublicBaseUri),
+      textusKnowledgeRdfNamespacePrefixes = higher.textusKnowledgeRdfNamespacePrefixes.orElse(textusKnowledgeRdfNamespacePrefixes),
+      textusKnowledgeRdfNamespaces = _merge_namespaces(textusKnowledgeRdfNamespaces, higher.textusKnowledgeRdfNamespaces),
       devComponentDevDirs = _merge_list(devComponentDevDirs, higher.devComponentDevDirs),
       carRepositories = _merge_list(carRepositories, higher.carRepositories),
       sarRepositories = _merge_list(sarRepositories, higher.sarRepositories),
@@ -71,6 +79,19 @@ final case class LauncherConfig(
   ): Vector[String] =
     (higher ++ lower).distinct
 
+  private def _merge_namespaces(
+    lower: Vector[(String, String)],
+    higher: Vector[(String, String)]
+  ): Vector[(String, String)] =
+    (higher ++ lower).foldLeft(Vector.empty[(String, String)]) { (z, x) =>
+      val prefix = _normalize_namespace_prefix(x._1)
+      val namespaceuri = x._2.trim
+      if (prefix.isEmpty || namespaceuri.isEmpty || z.exists(_._1 == prefix))
+        z
+      else
+        z :+ (prefix -> namespaceuri)
+    }
+
   private def _append_defaults(
     configured: Vector[String],
     defaults: Vector[String]
@@ -85,6 +106,9 @@ final case class LauncherConfig(
     val explicit = configured.filterNot(defaults.contains)
     (explicit ++ catalog ++ defaults).distinct
   }
+
+  private def _normalize_namespace_prefix(value: String): String =
+    value.trim.toLowerCase.replace('_', '-').replaceAll("[^a-z0-9-]+", "-").replaceAll("(^-+|-+$)", "")
 }
 
 object LauncherConfig {
@@ -139,6 +163,11 @@ object LauncherConfig {
         case other => throw CncfException(s"invalid boolean config value: $other")
       }
 
+    val namespaceprefixes =
+      _all_("textus.knowledge.rdf.namespace-prefixes", "textus.knowledge.rdf.namespace_prefixes", "textus.knowledge.rdf.namespacePrefixes")
+        .flatMap(_.split(",").toVector.map(_.trim).filter(_.nonEmpty))
+        .distinct
+
     LauncherConfig(
       runtimeVersion = _first_("runtime.version", "cncf.runtime.version", "version"),
       runtimeDevDir = _first_("runtime.dev-dir", "runtime.dev_dir", "cncf.runtime.dev-dir", "cncf.runtime.dev_dir", "runtime.devDir", "runtime.dev.dir", "cncf.runtime.devDir", "cncf.runtime.dev.dir"),
@@ -162,6 +191,10 @@ object LauncherConfig {
       devPort = _first_("dev.port", "cncf.dev.port"),
       devRestart = _boolean_("dev.restart", "cncf.dev.restart", "dev.stop-existing", "dev.stop_existing", "cncf.dev.stop-existing", "cncf.dev.stop_existing", "dev.stopExisting", "cncf.dev.stopExisting"),
       devForceExisting = _boolean_("dev.force-existing", "dev.force_existing", "cncf.dev.force-existing", "cncf.dev.force_existing", "dev.forceExisting", "cncf.dev.forceExisting"),
+      textusKnowledgeRdfNodePrefix = _first_("textus.knowledge.rdf.current-prefix", "textus.knowledge.rdf.current_prefix", "textus.knowledge.rdf.currentPrefix", "textus.knowledge.rdf.node-prefix", "textus.knowledge.rdf.node_prefix", "textus.knowledge.rdf.nodePrefix", "textus.knowledge.rdf.prefix"),
+      textusKnowledgeRdfPublicBaseUri = _first_("textus.knowledge.rdf.public-base-uri", "textus.knowledge.rdf.public_base_uri", "textus.knowledge.rdf.publicBaseUri", "textus.knowledge.rdf.public-base-url", "textus.knowledge.rdf.public_base_url", "textus.knowledge.rdf.publicBaseUrl"),
+      textusKnowledgeRdfNamespacePrefixes = if (namespaceprefixes.isEmpty) None else Some(namespaceprefixes.mkString(",")),
+      textusKnowledgeRdfNamespaces = _rdf_namespaces(values),
       devComponentDevDirs = _all_("dev.component-dev-dirs", "dev.component_dev_dirs", "cncf.dev.component-dev-dirs", "cncf.dev.component_dev_dirs", "dev.componentDevDirs", "dev.component.dev.dirs", "cncf.dev.componentDevDirs", "cncf.component.dev.dir"),
       carRepositories = _all_("repositories.car", "componentRepositories.car", "cncf.repository.car", "cncf.component.repository.car"),
       sarRepositories = _all_("repositories.sar", "componentRepositories.sar", "cncf.repository.sar", "cncf.subsystem.repository.sar"),
@@ -169,6 +202,28 @@ object LauncherConfig {
       coursierRepositories = _all_("repositories.coursier", "cncf.repository.coursier")
     )
   }
+
+  private def _rdf_namespaces(
+    values: Map[String, Vector[String]]
+  ): Vector[(String, String)] = {
+    val prefixes = Vector("textus.knowledge.rdf.namespaces.", "textus.knowledge.rdf.namespace.")
+    values.toVector.flatMap { case (key, xs) =>
+      prefixes.find(key.startsWith).toVector.flatMap { prefixkey =>
+        val prefix = key.stripPrefix(prefixkey)
+        xs.headOption.map(value => _normalize_namespace_prefix(prefix) -> value.trim)
+      }
+    }.filter { case (prefix, value) =>
+      prefix.nonEmpty && value.nonEmpty
+    }.foldLeft(Vector.empty[(String, String)]) { (z, x) =>
+      if (z.exists(_._1 == x._1))
+        z
+      else
+        z :+ x
+    }
+  }
+
+  private def _normalize_namespace_prefix(value: String): String =
+    value.trim.toLowerCase.replace('_', '-').replaceAll("[^a-z0-9-]+", "-").replaceAll("(^-+|-+$)", "")
 
   def localCarRepositories(paths: LauncherPaths): Vector[String] =
     Vector(paths.localCarRepository.toString)
@@ -210,6 +265,14 @@ object LauncherConfig {
     val devport = c.devPort.getOrElse(LauncherConfig.DEFAULT_DEV_PORT)
     val devrestart = c.devRestart.getOrElse(false)
     val devforce = c.devForceExisting.getOrElse(false)
+    val rdfprefix = c.textusKnowledgeRdfNodePrefix.getOrElse("(not configured)")
+    val rdfbaseuri = c.textusKnowledgeRdfPublicBaseUri.getOrElse("(not configured)")
+    val rdfnamespaceprefixes = c.textusKnowledgeRdfNamespacePrefixes.getOrElse("(not configured)")
+    val rdfnamespaces =
+      if (c.textusKnowledgeRdfNamespaces.isEmpty)
+        "(not configured)"
+      else
+        c.textusKnowledgeRdfNamespaces.map { case (prefix, uri) => s"$prefix=$uri" }.mkString(", ")
     val devdirs = c.devComponentDevDirs.mkString(", ")
     s"""runtime.version: $runtime
        |runtime.dev-dir: $runtimedevdir
@@ -222,6 +285,10 @@ object LauncherConfig {
        |dev.restart: $devrestart
        |dev.force-existing: $devforce
        |dev.component-dev-dirs: $devdirs
+       |textus.knowledge.rdf.node-prefix: $rdfprefix
+       |textus.knowledge.rdf.public-base-uri: $rdfbaseuri
+       |textus.knowledge.rdf.namespace-prefixes: $rdfnamespaceprefixes
+       |textus.knowledge.rdf.namespaces: $rdfnamespaces
        |local.repository: $localrepository
        |cache.repository: $cacherepository
        |local.repository.note: ~/.cncf/local is developer local publish state; ~/.cncf/cache is runtime-managed remote artifact cache

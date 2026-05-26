@@ -15,6 +15,7 @@ object CncfLauncherSpec {
     spec.parser()
     spec.launcherVersion()
     spec.configMerge()
+    spec.configSupportsAdditionalRdfNamespaces()
     spec.configFileOptionOverridesProjectConfig()
     spec.configFileProjectDevSurvivesTargetCwdSwitch()
     spec.configFileOptionRequiresExistingFile()
@@ -135,6 +136,41 @@ final class CncfLauncherSpec {
     assert(config.carRepositories.contains(paths.cacheCarRepository.toString))
     assert(config.sarRepositories.contains(paths.cacheSarRepository.toString))
     assert(config.carRepositories.contains("https://www.simplemodeling.org/repository/car"))
+  }
+
+  def configSupportsAdditionalRdfNamespaces(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.cwd.resolve(".cncf").resolve("config.yaml"),
+      s"""runtime:
+         |  version: 0.5.0
+         |  catalog:
+         |    url: ${paths.cwd.resolve("missing-runtime-catalog.yaml")}
+         |textus:
+         |  knowledge:
+         |    rdf:
+         |      current-prefix: acme
+         |      namespace-prefixes:
+         |        - acme
+         |        - sm
+         |      namespaces:
+         |        acme: https://example.com/acme
+         |        sm: https://www.simplemodeling.org
+         |""".stripMargin)
+    val config = LauncherConfig.load(paths)
+    _assert_equals(config.textusKnowledgeRdfNodePrefix, Some("acme"))
+    _assert_equals(config.textusKnowledgeRdfNamespacePrefixes, Some("acme,sm"))
+    assert(config.textusKnowledgeRdfNamespaces.contains("acme" -> "https://example.com/acme"))
+    assert(config.textusKnowledgeRdfNamespaces.contains("sm" -> "https://www.simplemodeling.org"))
+
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    launcher.run(Vector("dev", "server"))
+    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.node-prefix=acme"))
+    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.namespace-prefixes=acme,sm"))
+    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.namespaces.acme=https://example.com/acme"))
+    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.namespaces.sm=https://www.simplemodeling.org"))
   }
 
   def configFileOptionOverridesProjectConfig(): Unit = _with_temp_paths { paths =>
