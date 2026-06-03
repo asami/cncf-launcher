@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version May. 27, 2026
+ * @version Jun.  3, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -50,6 +50,7 @@ object CncfLauncherSpec {
     spec.devCommandDoesNotAutoActivateComponentDirArtifacts()
     spec.devTargetOptionsAreMutuallyExclusive()
     spec.devNameTargetUsesLocalSnapshotOnly()
+    spec.devNameTargetSnapshotBypassesReleaseCatalog()
     spec.devNameTargetUsesReleaseRepositories()
     spec.devServerEmulationRewritesToCncfArgs()
     spec.devProjectLoadsTargetProjectConfig()
@@ -816,6 +817,36 @@ final class CncfLauncherSpec {
     assert(invoker.lastArgs.contains(s"--textus.component.version=$version"))
     assert(invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}"))
     assert(!invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}"))
+  }
+
+  def devNameTargetSnapshotBypassesReleaseCatalog(): Unit = _with_temp_paths { paths =>
+    val name = "textus-demo"
+    val releaseversion = "0.1.0"
+    val snapshotversion = "0.1.1-SNAPSHOT"
+    _write(paths.localCarRepository.resolve(name).resolve(snapshotversion).resolve(s"$name-$snapshotversion.car"), "fake-car")
+    _write(paths.localCarRepository.getParent.resolve("catalog").resolve("car").resolve(s"$name.yaml"),
+      s"""schemaVersion: 1
+         |kind: car
+         |artifactId: $name
+         |recommended: $releaseversion
+         |latestStable: $releaseversion
+         |status: active
+         |aliases: []
+         |versions:
+         |  - version: $releaseversion
+         |    channel: stable
+         |    status: active
+         |    component: $name
+         |    file: repository/car/$name/$releaseversion/$name-$releaseversion.car
+         |""".stripMargin)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("dev", "server", "--name", s"$name:$snapshotversion"))
+
+    assert(invoker.lastArgs.contains(s"--textus.component=$name"))
+    assert(invoker.lastArgs.contains(s"--textus.component.version=$snapshotversion"))
+    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}"))
   }
 
   def devNameTargetUsesReleaseRepositories(): Unit = _with_temp_paths { paths =>

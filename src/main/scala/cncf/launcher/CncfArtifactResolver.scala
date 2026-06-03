@@ -6,7 +6,7 @@ import scala.util.Using
 
 /*
  * @since   May. 26, 2026
- * @version May. 26, 2026
+ * @version Jun.  3, 2026
  * @author  ASAMI, Tomoharu
  */
 enum CncfArtifactKind {
@@ -106,12 +106,15 @@ final class CncfArtifactResolver {
     suffix: String,
     effectiverepositories: Vector[String]
   ): Option[CncfResolvedArtifact] =
-    _local_catalog_path(repository, selector.name, suffix) match {
-      case Some(path) =>
-        Some(_local_catalog_artifact(selector, repository, suffix, path, effectiverepositories))
-      case None =>
-        _local_metadata_artifact(selector, repository, suffix, effectiverepositories)
-    }
+    if (selector.version.exists(_is_snapshot_version))
+      _local_metadata_artifact(selector, repository, suffix, effectiverepositories)
+    else
+      _local_catalog_path(repository, selector.name, suffix) match {
+        case Some(path) =>
+          Some(_local_catalog_artifact(selector, repository, suffix, path, effectiverepositories))
+        case None =>
+          _local_metadata_artifact(selector, repository, suffix, effectiverepositories)
+      }
 
   private def _local_metadata_artifact(
     selector: CncfArtifactSelector,
