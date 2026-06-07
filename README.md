@@ -50,7 +50,7 @@ fullClasspath`. Use `cncf dev classpath --project-dev <dir>` to prepare it
 manually.
 
 Dependency components are separate from the main target. Use
-`--component-dev-dir <dir>` or `.cncf/launcher.yaml` `dev.component-dev-dirs` for
+`--component-dev-dir <dir>` or `conf/cncf/launcher.yaml` `dev.component-dev-dirs` for
 source-level debugging of dependencies that are also under local development.
 For the normal dependency-component development loop, run `sbt
 cozyPublishLocalCar` in the dependency component. This publishes the CAR,
@@ -75,12 +75,14 @@ The `cncf` launcher reads launcher configuration from:
 
 ```text
 ~/.cncf/launcher.yaml
+$PWD/conf/cncf/launcher.yaml
 $PWD/.cncf/launcher.yaml
 ```
 
 For `cncf dev ... --project-dev <dir>`, the project launcher config is
-`<dir>/.cncf/launcher.yaml`. Use `--config <file>` for an additional launcher
-config file, for example:
+`<dir>/conf/cncf/launcher.yaml`, with `<dir>/.cncf/launcher.yaml` as a local
+override. Use `--config <file>` for an additional launcher config file, for
+example:
 
 ```bash
 cncf --config etc/launcher/debug.yaml dev server
@@ -116,8 +118,9 @@ repositories:
 
 CNCF runtime configuration is separate from launcher configuration. Runtime
 configuration is read by the CNCF runtime after the launcher has selected and
-started it. Use `.cncf/config.yaml` / `.textus/config.yaml` for project runtime
-configuration, or pass an explicit runtime config file through the launcher:
+started it. Use `conf/cncf/config.yaml` for Git-managed project runtime
+configuration and `.cncf/config.yaml` for local override configuration. You can
+also pass an explicit runtime config file through the launcher:
 
 ```bash
 cncf --config etc/launcher/debug.yaml --cncf-config etc/debug.yaml dev server
@@ -147,10 +150,12 @@ public/cache lookup.
 Configure repositories explicitly or publish dependency components to
 `~/.cncf/local`.
 
-`.cozy/config.yaml` belongs to build/publish operation defaults.
-`.cncf/launcher.yaml` belongs to the `cncf` launcher.
-`.cncf/config.yaml` and `.textus/config.yaml` belong to CNCF runtime
-configuration.
+`conf/cozy/config.yaml` and `.cozy/config.yaml` belong to build/publish
+operation defaults.
+`conf/cncf/launcher.yaml` and `.cncf/launcher.yaml` belong to the `cncf`
+launcher.
+`conf/cncf/config.yaml`, `.cncf/config.yaml`, and `.textus/config.yaml` belong
+to CNCF runtime configuration.
 `project.yaml` belongs to artifact metadata and runtime compatibility.
 
 `.textus/config.yaml` remains a CNCF runtime/project configuration file. It is

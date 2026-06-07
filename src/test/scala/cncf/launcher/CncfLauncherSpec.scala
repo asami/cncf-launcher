@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version Jun.  3, 2026
+ * @version Jun.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -18,6 +18,7 @@ object CncfLauncherSpec {
     spec.configSupportsAdditionalRdfNamespaces()
     spec.configFileOptionOverridesProjectConfig()
     spec.launcherConfigSupportsPropertiesAndConfFiles()
+    spec.defaultRuntimeConfigFilesAreForwarded()
     spec.configFileProjectDevSurvivesTargetCwdSwitch()
     spec.cncfConfigOptionIsForwardedToRuntime()
     spec.configFileOptionRequiresExistingFile()
@@ -112,27 +113,38 @@ final class CncfLauncherSpec {
         |  sar:
         |    - https://global.example/sar
         |""".stripMargin)
-    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+    _write(paths.cwd.resolve("conf").resolve("cncf").resolve("launcher.yaml"),
       """runtime:
         |  version: 0.2.0
-        |  devDir: ../project-cncf
         |dev:
         |  project-dev: .
         |  componentDevDirs:
         |    - ../project-component
+        |    - ../shared-component
         |repositories:
         |  car:
         |    - https://project.example/car
         |""".stripMargin)
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """runtime:
+        |  devDir: ../local-cncf
+        |dev:
+        |  componentDevDirs:
+        |    - ../local-component
+        |repositories:
+        |  car:
+        |    - https://local.example/car
+        |""".stripMargin)
     val config = LauncherConfig.load(paths)
     _assert_equals(config.runtimeVersion, Some("0.2.0"))
-    _assert_equals(config.runtimeDevDir, Some("../project-cncf"))
+    _assert_equals(config.runtimeDevDir, Some("../local-cncf"))
     _assert_equals(config.runtimeCatalogUrl, Some("https://global.example/catalog.yaml"))
     _assert_equals(config.devProjectDev, Some("."))
     _assert_equals(config.devPort, Some("19000"))
-    _assert_equals(config.devComponentDevDirs, Vector("../project-component", "../global-component"))
-    assert(config.carRepositories.head == "https://project.example/car")
-    assert(config.carRepositories(1) == "https://global.example/car")
+    _assert_equals(config.devComponentDevDirs, Vector("../local-component", "../project-component", "../shared-component", "../global-component"))
+    assert(config.carRepositories.head == "https://local.example/car")
+    assert(config.carRepositories(1) == "https://project.example/car")
+    assert(config.carRepositories(2) == "https://global.example/car")
     assert(config.sarRepositories.head == "https://global.example/sar")
     assert(config.carRepositories.contains(paths.localCarRepository.toString))
     assert(config.sarRepositories.contains(paths.localSarRepository.toString))
@@ -145,7 +157,7 @@ final class CncfLauncherSpec {
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+    _write(paths.cwd.resolve("conf").resolve("cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  version: 0.5.0
          |  catalog:
@@ -180,7 +192,7 @@ final class CncfLauncherSpec {
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+    _write(paths.cwd.resolve("conf").resolve("cncf").resolve("launcher.yaml"),
       """runtime:
         |  version: 0.1.0
         |dev:
@@ -224,6 +236,30 @@ final class CncfLauncherSpec {
     _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
     assert(invoker.lastArgs.exists(_.startsWith("--cncf.config.files=")))
     assert(invoker.lastArgs.exists(_.contains("runtime-debug.yaml")))
+  }
+
+  def defaultRuntimeConfigFilesAreForwarded(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
+    _write(paths.globalRuntimeConfig, "textus:\n  global: true\n")
+    _write(paths.projectRuntimeConfig, "textus:\n  project: true\n")
+    _write(paths.projectLocalRuntimeConfig, "textus:\n  local: true\n")
+    _write(paths.cwd.resolve("etc").resolve("runtime-extra.yaml"), "textus:\n  extra: true\n")
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("--cncf-config", "etc/runtime-extra.yaml", "dev", "server"))
+
+    val configarg = invoker.lastArgs.find(_.startsWith("--cncf.config.files=")).getOrElse("")
+    val values = configarg.stripPrefix("--cncf.config.files=").split(",").toVector
+    _assert_equals(values, Vector(
+      paths.globalRuntimeConfig.toAbsolutePath.normalize.toString,
+      paths.projectRuntimeConfig.toAbsolutePath.normalize.toString,
+      paths.projectLocalRuntimeConfig.toAbsolutePath.normalize.toString,
+      paths.cwd.resolve("etc").resolve("runtime-extra.yaml").toAbsolutePath.normalize.toString
+    ))
+    assert(!invoker.lastArgs.contains("--cncf-config"))
   }
 
   def configFileProjectDevSurvivesTargetCwdSwitch(): Unit = _with_temp_paths { paths =>
@@ -886,7 +922,7 @@ final class CncfLauncherSpec {
     val classdir = project.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
     _write(project.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
-    _write(project.resolve(".cncf").resolve("launcher.yaml"),
+    _write(project.resolve("conf").resolve("cncf").resolve("launcher.yaml"),
       s"""runtime:
          |  version: 0.5.0
          |  catalog:

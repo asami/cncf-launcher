@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version May. 27, 2026
+ * @version Jun.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -467,9 +467,9 @@ object CncfCommandParser {
       |  --force-existing permits force stop after graceful stop fails or ambiguous state overwrite.
       |  cncf dev stop stops the recorded dev server for the selected project and port without starting a new server.
       |  --profile local-persistent stores development DataStore state in target/cncf.d/runtime.sqlite.
-      |  The same profile can be configured as dev.profile: local-persistent in .cncf/launcher.yaml.
-      |  Launcher settings live in ~/.cncf/launcher.yaml and .cncf/launcher.yaml.
-      |  CNCF runtime settings live in ~/.cncf/config.yaml and .cncf/config.yaml.
+      |  The same profile can be configured as dev.profile: local-persistent in conf/cncf/launcher.yaml.
+      |  Launcher settings load from ~/.cncf/launcher.yaml, conf/cncf/launcher.yaml, then .cncf/launcher.yaml.
+      |  CNCF runtime settings load from ~/.cncf/config.yaml, conf/cncf/config.yaml, then .cncf/config.yaml.
       |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.
       |  Dependency components without local overrides are resolved by CNCF component repositories at runtime.
       |  The default local component repository is ~/.cncf/local/repository/car and ~/.cncf/local/repository/sar.

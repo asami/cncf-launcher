@@ -4,7 +4,7 @@ import java.nio.file.{Path, Paths}
 
 /*
  * @since   May. 17, 2026
- * @version May. 27, 2026
+ * @version Jun.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherPaths(
@@ -13,7 +13,11 @@ final case class LauncherPaths(
 ) {
   val cncfHome: Path = home.resolve(".cncf")
   val globalConfig: Path = cncfHome.resolve("launcher.yaml")
-  val projectConfig: Path = cwd.resolve(".cncf").resolve("launcher.yaml")
+  val projectConfig: Path = cwd.resolve("conf").resolve("cncf").resolve("launcher.yaml")
+  val projectLocalConfig: Path = cwd.resolve(".cncf").resolve("launcher.yaml")
+  val globalRuntimeConfig: Path = cncfHome.resolve("config.yaml")
+  val projectRuntimeConfig: Path = cwd.resolve("conf").resolve("cncf").resolve("config.yaml")
+  val projectLocalRuntimeConfig: Path = cwd.resolve(".cncf").resolve("config.yaml")
   val globalVersion: Path = cncfHome.resolve("version")
   val projectVersion: Path = cwd.resolve(".cncf").resolve("version")
   val runtimeRoot: Path = cncfHome.resolve("runtimes")

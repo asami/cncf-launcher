@@ -5,7 +5,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version May. 27, 2026
+ * @version Jun.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
@@ -42,7 +42,7 @@ final case class LauncherConfig(
       devPort = higher.devPort.orElse(devPort),
       devRestart = higher.devRestart.orElse(devRestart),
       devForceExisting = higher.devForceExisting.orElse(devForceExisting),
-      cncfConfigFiles = _merge_list(cncfConfigFiles, higher.cncfConfigFiles),
+      cncfConfigFiles = _merge_config_files(cncfConfigFiles, higher.cncfConfigFiles),
       textusKnowledgeRdfNodePrefix = higher.textusKnowledgeRdfNodePrefix.orElse(textusKnowledgeRdfNodePrefix),
       textusKnowledgeRdfPublicBaseUri = higher.textusKnowledgeRdfPublicBaseUri.orElse(textusKnowledgeRdfPublicBaseUri),
       textusKnowledgeRdfNamespacePrefixes = higher.textusKnowledgeRdfNamespacePrefixes.orElse(textusKnowledgeRdfNamespacePrefixes),
@@ -80,6 +80,12 @@ final case class LauncherConfig(
     higher: Vector[String]
   ): Vector[String] =
     (higher ++ lower).distinct
+
+  private def _merge_config_files(
+    lower: Vector[String],
+    higher: Vector[String]
+  ): Vector[String] =
+    (lower ++ higher).distinct
 
   private def _merge_namespaces(
     lower: Vector[(String, String)],
@@ -130,14 +136,22 @@ object LauncherConfig {
   ): LauncherConfig = {
     val global = loadFile(paths.globalConfig)
     val project = loadFile(paths.projectConfig)
+    val projectlocal = loadFile(paths.projectLocalConfig)
     val base = LauncherConfig()
       .mergeHigher(global)
       .mergeHigher(project)
+      .mergeHigher(projectlocal)
     val explicit = configfiles.foldLeft(base) { (acc, file) =>
       acc.mergeHigher(loadRequiredFile(paths.cwd.resolve(file).normalize.toAbsolutePath.normalize))
     }
-    explicit.normalizedWithDefaults(paths)
+    explicit.copy(cncfConfigFiles = _default_runtime_config_files(paths) ++ explicit.cncfConfigFiles).
+      normalizedWithDefaults(paths)
   }
+
+  private def _default_runtime_config_files(paths: LauncherPaths): Vector[String] =
+    Vector(paths.globalRuntimeConfig, paths.projectRuntimeConfig, paths.projectLocalRuntimeConfig).
+      filter(Files.isRegularFile(_)).
+      map(_.toAbsolutePath.normalize.toString)
 
   def loadFile(path: Path): LauncherConfig =
     if (Files.isRegularFile(path)) {

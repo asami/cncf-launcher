@@ -9,7 +9,7 @@ import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version May. 26, 2026
+ * @version Jun.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
@@ -117,7 +117,7 @@ final class DevSupport(
     val executionprofile = Vector(_check_execution_profile(context))
     val target = _check_target(context)
     val dependencyresolution = Vector(
-      DevCheckItem.ok("dependency-components", "local dev overrides from --component-dev-dir/.cncf config; otherwise resolved by CNCF component repositories"),
+      DevCheckItem.ok("dependency-components", "local dev overrides from --component-dev-dir or conf/cncf/.cncf config; otherwise resolved by CNCF component repositories"),
       _check_local_repository(paths.localRepository),
       _check_local_repository(paths.localCarRepository),
       _check_local_repository(paths.localSarRepository),
