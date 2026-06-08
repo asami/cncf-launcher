@@ -15,6 +15,7 @@ object CncfLauncherSpec {
     spec.parser()
     spec.launcherVersion()
     spec.configMerge()
+    spec.launcherDevDirDelegatesToDevelopmentLauncher()
     spec.configSupportsAdditionalRdfNamespaces()
     spec.configFileOptionOverridesProjectConfig()
     spec.launcherConfigSupportsPropertiesAndConfFiles()
@@ -126,7 +127,11 @@ final class CncfLauncherSpec {
         |    - https://project.example/car
         |""".stripMargin)
     _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
-      """runtime:
+      """cncf:
+        |  launcher:
+        |    dev:
+        |      dir: ../launcher-cncf
+        |runtime:
         |  devDir: ../local-cncf
         |dev:
         |  componentDevDirs:
@@ -136,6 +141,7 @@ final class CncfLauncherSpec {
         |    - https://local.example/car
         |""".stripMargin)
     val config = LauncherConfig.load(paths)
+    _assert_equals(config.launcherDevDir, Some("../launcher-cncf"))
     _assert_equals(config.runtimeVersion, Some("0.2.0"))
     _assert_equals(config.runtimeDevDir, Some("../local-cncf"))
     _assert_equals(config.runtimeCatalogUrl, Some("https://global.example/catalog.yaml"))
@@ -151,6 +157,27 @@ final class CncfLauncherSpec {
     assert(config.carRepositories.contains(paths.cacheCarRepository.toString))
     assert(config.sarRepositories.contains(paths.cacheSarRepository.toString))
     assert(config.carRepositories.contains("https://www.simplemodeling.org/repository/car"))
+  }
+
+  def launcherDevDirDelegatesToDevelopmentLauncher(): Unit = _with_temp_paths { paths =>
+    val launcherdevdir = paths.cwd.resolve("launcher-cncf")
+    Files.createDirectories(launcherdevdir)
+    _write(paths.cwd.resolve("conf").resolve("cncf").resolve("launcher.yaml"),
+      """cncf:
+        |  launcher:
+        |    dev:
+        |      dir: launcher-cncf
+        |runtime:
+        |  version: 0.5.0
+        |""".stripMargin)
+    val invoker = FakeLauncherDevInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), SbtRuntimeClasspathExporter, DevServerProcessManager.System, invoker)
+
+    val code = launcher.run(Vector("launcher", "version"))
+
+    _assert_equals(code, 0)
+    _assert_equals(invoker.devDir, Some(launcherdevdir.toAbsolutePath.normalize))
+    _assert_equals(invoker.args, Vector("launcher", "version"))
   }
 
   def configSupportsAdditionalRdfNamespaces(): Unit = _with_temp_paths { paths =>
@@ -1439,6 +1466,21 @@ final class FakeInvoker extends CncfInvoker {
 
 object FakeInvoker {
   def apply(): FakeInvoker = new FakeInvoker()
+}
+
+final class FakeLauncherDevInvoker extends LauncherDevInvoker {
+  var devDir: Option[Path] = None
+  var args: Vector[String] = Vector.empty
+
+  def invoke(devdir: Path, args: Vector[String]): Int = {
+    this.devDir = Some(devdir)
+    this.args = args
+    0
+  }
+}
+
+object FakeLauncherDevInvoker {
+  def apply(): FakeLauncherDevInvoker = new FakeLauncherDevInvoker()
 }
 
 final class FakeDevServerProcessManager(

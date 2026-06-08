@@ -96,6 +96,11 @@ formats.
 Example:
 
 ```yaml
+cncf:
+  launcher:
+    dev:
+      dir: <cncf-launcher-checkout>
+
 runtime:
   version: recommended
   dev-dir: ../cncf
@@ -113,6 +118,14 @@ repositories:
   maven:
     - https://www.simplemodeling.org/repository/maven
 ```
+
+`cncf.launcher.dev.dir` is for the launcher itself. When an installed `cncf`
+supports this key, it delegates to the development launcher in that checkout
+and passes the original command line through. The delegated launcher is marked
+internally so it does not recursively delegate again.
+
+`runtime.dev-dir` is different: it selects the CNCF runtime checkout used by
+`cncf dev ...` commands after the launcher has started.
 
 ## CNCF Runtime Configuration
 

@@ -9,7 +9,8 @@ import scala.util.Using
 
 /*
  * @since   May. 17, 2026
- * @version May. 18, 2026
+ *  version May. 18, 2026
+ * @version Jun.  8, 2026
  * @author  ASAMI, Tomoharu
  */
 trait CncfRuntimeResolver {
@@ -176,6 +177,41 @@ class CncfInvoker {
       }
       Thread.currentThread().setContextClassLoader(old)
       loader.close()
+    }
+  }
+}
+
+trait LauncherDevInvoker {
+  def invoke(devdir: Path, args: Vector[String]): Int
+}
+
+object LauncherDevInvoker {
+  object System extends LauncherDevInvoker {
+    def invoke(devdir: Path, args: Vector[String]): Int = {
+      if (!Files.isDirectory(devdir))
+        throw CncfException(s"cncf launcher development directory not found: ${devdir}")
+      val argsfile = _write_args_file(args)
+      try {
+        val builder = new java.lang.ProcessBuilder("sbt", "--batch", "run")
+        builder.directory(devdir.toFile)
+        builder.inheritIO()
+        builder.environment().put("CNCF_LAUNCHER_DEV_DELEGATED", "1")
+        builder.environment().put("CNCF_LAUNCHER_ARGS_FILE", argsfile.toString)
+        builder.start().waitFor()
+      } finally {
+        Files.deleteIfExists(argsfile)
+      }
+    }
+
+    private def _write_args_file(args: Vector[String]): Path = {
+      val argsfile = Files.createTempFile("cncf-launcher-args-", ".bin")
+      val payload =
+        if (args.isEmpty)
+          ""
+        else
+          args.mkString("", "\u0000", "\u0000")
+      Files.write(argsfile, payload.getBytes(StandardCharsets.UTF_8))
+      argsfile
     }
   }
 }

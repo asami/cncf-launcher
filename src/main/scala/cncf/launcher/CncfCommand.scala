@@ -448,6 +448,7 @@ object CncfCommandParser {
       |  --cncf-config <file> loads an additional CNCF runtime config file.
       |  Launcher config files may use yaml/yml, properties, props, or lightweight conf.
       |  Launcher conf/properties files support dotted key assignments such as runtime.dev-dir = ../cncf.
+      |  Config cncf.launcher.dev.dir selects an sbt checkout for the launcher itself.
       |  Full JSON/XML/HOCON are CNCF runtime config formats, not launcher config formats.
       |  Runtime args before server/client/command are forwarded to CncfMain.
       |  --profile local-persistent configures target/cncf.d/runtime.sqlite as the local SQLite DataStore for development checks.

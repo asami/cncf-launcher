@@ -9,6 +9,7 @@ import java.nio.file.{Files, Path}
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
+  launcherDevDir: Option[String] = None,
   runtimeVersion: Option[String] = None,
   runtimeDevDir: Option[String] = None,
   runtimeCatalogUrl: Option[String] = None,
@@ -32,6 +33,7 @@ final case class LauncherConfig(
 ) {
   def mergeHigher(higher: LauncherConfig): LauncherConfig =
     LauncherConfig(
+      launcherDevDir = higher.launcherDevDir.orElse(launcherDevDir),
       runtimeVersion = higher.runtimeVersion.orElse(runtimeVersion),
       runtimeDevDir = higher.runtimeDevDir.orElse(runtimeDevDir),
       runtimeCatalogUrl = higher.runtimeCatalogUrl.orElse(runtimeCatalogUrl),
@@ -185,6 +187,7 @@ object LauncherConfig {
         .distinct
 
     LauncherConfig(
+      launcherDevDir = _first_("cncf.launcher.dev.dir", "cncf.launcher.dev-dir", "cncf.launcher.devDir", "launcher.dev.dir", "launcher.dev-dir", "launcher.devDir"),
       runtimeVersion = _first_("runtime.version", "cncf.runtime.version", "version"),
       runtimeDevDir = _first_("runtime.dev-dir", "runtime.dev_dir", "cncf.runtime.dev-dir", "cncf.runtime.dev_dir", "runtime.devDir", "runtime.dev.dir", "cncf.runtime.devDir", "cncf.runtime.dev.dir"),
       runtimeCatalogUrl = _first_("runtime.catalog.url", "cncf.runtime.catalog.url", "catalog.url"),
@@ -276,6 +279,7 @@ object LauncherConfig {
         config
       else
         config.normalizedWithDefaults
+    val launcherdevdir = c.launcherDevDir.getOrElse("(not configured)")
     val runtime = c.runtimeVersion.getOrElse("(not configured)")
     val runtimedevdir = c.runtimeDevDir.getOrElse("(not configured)")
     val catalog = c.runtimeCatalogUrl.getOrElse("(not configured)")
@@ -307,7 +311,8 @@ object LauncherConfig {
       else
         c.textusKnowledgeRdfNamespaces.map { case (prefix, uri) => s"$prefix=$uri" }.mkString(", ")
     val devdirs = c.devComponentDevDirs.mkString(", ")
-    s"""runtime.version: $runtime
+    s"""launcher.dev-dir: $launcherdevdir
+       |runtime.version: $runtime
        |runtime.dev-dir: $runtimedevdir
        |runtime.catalog.url: $catalog
        |runtime.cncf.selection-policy: $selection
