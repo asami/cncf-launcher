@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version Jun.  8, 2026
+ * @version Jun. 10, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -28,6 +28,7 @@ object CncfLauncherSpec {
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
     spec.runtimeCatalogParseAndSelectorResolution()
     spec.runtimeCatalogCommands()
+    spec.runtimeCurrentWarnsWhenCachedRecommendedIsStale()
     spec.runtimeDescriptorCommands()
     spec.runtimeDescriptorPrefersRuntimeJarDescriptor()
     spec.devParser()
@@ -410,6 +411,28 @@ final class CncfLauncherSpec {
     launcher.run(Vector("runtime", "use", "recommended", "--project"))
     _assert_equals(Files.readString(paths.projectVersion).trim, "recommended")
     launcher.run(Vector("runtime", "current"))
+  }
+
+  def runtimeCurrentWarnsWhenCachedRecommendedIsStale(): Unit = _with_temp_paths { paths =>
+    val remotecatalog = paths.cwd.resolve("runtime-catalog.yaml")
+    _write(paths.runtimeCatalog, _catalog_text)
+    _write(remotecatalog, _catalog_text.replace("recommended: 0.2.0", "recommended: 0.3.0-SNAPSHOT"))
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: $remotecatalog
+         |""".stripMargin)
+    val launcher = new CncfLauncher(paths, CoursierCncfRuntimeResolver("false"), FakeInvoker())
+
+    val (code, stdout, stderr) = _capture_stdout_stderr {
+      launcher.run(Vector("runtime", "current"))
+    }
+
+    _assert_equals(code, 0)
+    _assert_equals(stdout.trim, "0.2.0")
+    assert(stderr.contains("cached CNCF runtime catalog resolves recommended to 0.2.0"))
+    assert(stderr.contains("remote catalog resolves it to 0.3.0-SNAPSHOT"))
+    assert(stderr.contains("cncf runtime refresh"))
   }
 
   def runtimeDescriptorCommands(): Unit = _with_temp_paths { paths =>
@@ -1255,6 +1278,11 @@ final class CncfLauncherSpec {
   }
 
   def latestRuntimeIsConcrete(): Unit = _with_temp_paths { paths =>
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("missing-runtime-catalog.yaml")}
+         |""".stripMargin)
     val resolver = FakeResolver()
     val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
     launcher.run(Vector("runtime", "current"))
@@ -1273,6 +1301,17 @@ final class CncfLauncherSpec {
       f
     }
     (code, out.toString)
+  }
+
+  private def _capture_stdout_stderr(f: => Int): (Int, String, String) = {
+    val out = new java.io.ByteArrayOutputStream()
+    val err = new java.io.ByteArrayOutputStream()
+    val code = Console.withOut(new java.io.PrintStream(out)) {
+      Console.withErr(new java.io.PrintStream(err)) {
+        f
+      }
+    }
+    (code, out.toString, err.toString)
   }
 
   private def _with_temp_paths(f: LauncherPaths => Unit): Unit = {
