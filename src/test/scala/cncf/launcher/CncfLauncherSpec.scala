@@ -6,7 +6,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 10, 2026
+ * @version Jun. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -93,7 +93,7 @@ final class CncfLauncherSpec {
       launcher.run(Vector("--version"))
     }
     _assert_equals(code, 0)
-    _assert_equals(output.trim, s"${LauncherBuildInfo.name} ${LauncherBuildInfo.version}")
+    _assert_equals(output.trim, s"cncf ${LauncherBuildInfo.version}")
     _assert_equals(CncfCommandParser.parse(Vector("version")), CncfCommand.Version)
     _assert_equals(CncfCommandParser.parse(Vector("launcher", "version")), CncfCommand.Version)
   }
@@ -179,6 +179,7 @@ final class CncfLauncherSpec {
     _assert_equals(code, 0)
     _assert_equals(invoker.devDir, Some(launcherdevdir.toAbsolutePath.normalize))
     _assert_equals(invoker.args, Vector("launcher", "version"))
+    _assert_equals(invoker.cwd, Some(paths.cwd.toAbsolutePath.normalize))
   }
 
   def configSupportsAdditionalRdfNamespaces(): Unit = _with_temp_paths { paths =>
@@ -1510,10 +1511,12 @@ object FakeInvoker {
 final class FakeLauncherDevInvoker extends LauncherDevInvoker {
   var devDir: Option[Path] = None
   var args: Vector[String] = Vector.empty
+  var cwd: Option[Path] = None
 
-  def invoke(devdir: Path, args: Vector[String]): Int = {
+  def invoke(devdir: Path, args: Vector[String], cwd: Path): Int = {
     this.devDir = Some(devdir)
     this.args = args
+    this.cwd = Some(cwd)
     0
   }
 }

@@ -10,7 +10,7 @@ cozyCoursierChannelPath := "repository/textus/coursier-channel.json"
 cozyCoursierChannelEntries := Seq(CozyCoursierChannelEntry(
   name = "cncf",
   repositories = Seq("central", "https://www.simplemodeling.org/repository/maven"),
-  dependencies = Seq(s"org.goldenport:cncf_3:${version.value}"),
+  dependencies = Seq(s"org.goldenport:cncf-launcher_3:${version.value}"),
   mainClass = "cncf.launcher.CncfLauncherMain"
 ))
 
@@ -30,12 +30,12 @@ def launcherBuildInfoSource(target: File, packageName: String, launcherName: Str
 lazy val root = (project in file("."))
   .enablePlugins(org.goldenport.cozy.CozyPlugin)
   .settings(
-    name := "cncf",
+    name := "cncf-launcher",
     Compile / sourceGenerators += Def.task {
       Seq(launcherBuildInfoSource(
         (Compile / sourceManaged).value / "launcher-build-info",
         "cncf.launcher",
-        name.value,
+        "cncf",
         version.value
       ))
     }.taskValue,

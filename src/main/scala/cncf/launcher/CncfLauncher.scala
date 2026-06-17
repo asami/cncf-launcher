@@ -8,7 +8,7 @@ import scala.util.Try
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jun. 10, 2026
+ * @version Jun. 15, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -51,7 +51,7 @@ final class CncfLauncher(
     else
       config.launcherDevDir.map { dir =>
         val path = paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize
-        launcherdevinvoker.invoke(path, args)
+        launcherdevinvoker.invoke(path, args, paths.cwd.toAbsolutePath.normalize)
       }
 
   private def _run_runtime(

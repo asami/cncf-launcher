@@ -10,7 +10,7 @@ import scala.util.Using
 /*
  * @since   May. 17, 2026
  *  version May. 18, 2026
- * @version Jun.  8, 2026
+ * @version Jun. 15, 2026
  * @author  ASAMI, Tomoharu
  */
 trait CncfRuntimeResolver {
@@ -182,18 +182,24 @@ class CncfInvoker {
 }
 
 trait LauncherDevInvoker {
-  def invoke(devdir: Path, args: Vector[String]): Int
+  def invoke(devdir: Path, args: Vector[String], cwd: Path): Int
 }
 
 object LauncherDevInvoker {
   object System extends LauncherDevInvoker {
-    def invoke(devdir: Path, args: Vector[String]): Int = {
+    def invoke(devdir: Path, args: Vector[String], cwd: Path): Int = {
       if (!Files.isDirectory(devdir))
         throw CncfException(s"cncf launcher development directory not found: ${devdir}")
+      val classpath = _launcher_classpath(devdir)
       val argsfile = _write_args_file(args)
       try {
-        val builder = new java.lang.ProcessBuilder("sbt", "--batch", "run")
-        builder.directory(devdir.toFile)
+        val builder = new java.lang.ProcessBuilder(
+          "java",
+          "-cp",
+          classpath,
+          "cncf.launcher.CncfLauncherMain"
+        )
+        builder.directory(cwd.toFile)
         builder.inheritIO()
         builder.environment().put("CNCF_LAUNCHER_DEV_DELEGATED", "1")
         builder.environment().put("CNCF_LAUNCHER_ARGS_FILE", argsfile.toString)
@@ -201,6 +207,16 @@ object LauncherDevInvoker {
       } finally {
         Files.deleteIfExists(argsfile)
       }
+    }
+
+    private def _launcher_classpath(devdir: Path): String = {
+      val file = devdir.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")
+      if (!Files.isRegularFile(file))
+        throw CncfException(s"cncf launcher development classpath not found: ${file}; run cncf dev classpath in ${devdir}")
+      val value = Files.readString(file, StandardCharsets.UTF_8).trim
+      if (value.isEmpty)
+        throw CncfException(s"cncf launcher development classpath is empty: ${file}")
+      value
     }
 
     private def _write_args_file(args: Vector[String]): Path = {
