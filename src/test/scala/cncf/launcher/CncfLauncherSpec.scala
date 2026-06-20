@@ -6,13 +6,14 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 18, 2026
+ * @version Jun. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
   def main(args: Array[String]): Unit = {
     val spec = new CncfLauncherSpec
     spec.parser()
+    spec.runtimeVersion()
     spec.launcherVersion()
     spec.configMerge()
     spec.launcherDevDirDelegatesToDevelopmentLauncher()
@@ -87,15 +88,27 @@ final class CncfLauncherSpec {
     _assert_equals(autouse.target, CncfCommand.RuntimeUseTarget.Auto)
   }
 
+  def runtimeVersion(): Unit = _with_temp_paths { paths =>
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"), "runtime:\n  version: 0.1.0\n")
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    val (code, output) = _capture_stdout {
+      launcher.run(Vector("version"))
+    }
+    _assert_equals(code, 0)
+    _assert_equals(output.trim, "0.1.0")
+    _assert_equals(CncfCommandParser.parse(Vector("version")), CncfCommand.Runtime.Current)
+    _assert_equals(CncfCommandParser.parse(Vector("--version")), CncfCommand.Runtime.Current)
+  }
+
   def launcherVersion(): Unit = _with_temp_paths { paths =>
     val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
     val (code, output) = _capture_stdout {
-      launcher.run(Vector("--version"))
+      launcher.run(Vector("launcher", "version"))
     }
     _assert_equals(code, 0)
     _assert_equals(output.trim, s"cncf ${LauncherBuildInfo.version}")
-    _assert_equals(CncfCommandParser.parse(Vector("version")), CncfCommand.Version)
-    _assert_equals(CncfCommandParser.parse(Vector("launcher", "version")), CncfCommand.Version)
+    _assert_equals(CncfCommandParser.parse(Vector("launcher", "version")), CncfCommand.LauncherVersion)
+    _assert_equals(CncfCommandParser.parse(Vector("launcher", "--version")), CncfCommand.LauncherVersion)
   }
 
   def configMerge(): Unit = _with_temp_paths { paths =>

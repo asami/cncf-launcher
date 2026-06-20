@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version Jun.  8, 2026
+ * @version Jun. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -86,14 +86,16 @@ object CncfCommand {
       }
   }
 
-  case object Version extends CncfCommand
+  case object LauncherVersion extends CncfCommand
   case object Help extends CncfCommand
 }
 
 object CncfCommandParser {
   def parse(args: Vector[String]): CncfCommand = {
-    if (args == Vector("--version") || args == Vector("version") || args == Vector("launcher", "version")) {
-      CncfCommand.Version
+    if (args == Vector("--version") || args == Vector("version")) {
+      CncfCommand.Runtime.Current
+    } else if (args == Vector("launcher", "version") || args == Vector("launcher", "--version")) {
+      CncfCommand.LauncherVersion
     } else if (args.isEmpty || args.contains("--help") || args.contains("-h")) {
       CncfCommand.Help
     } else {
@@ -447,7 +449,7 @@ object CncfCommandParser {
       |  --config <file> loads an additional launcher config file; CLI config wins over global/project config.
       |  --cncf-config <file> loads an additional CNCF runtime config file.
       |  Launcher config files may use yaml/yml, properties, props, or lightweight conf.
-      |  Launcher conf/properties files support dotted key assignments such as runtime.dev-dir = ../cncf.
+      |  Launcher conf/properties files support dotted key assignments such as runtime.dev-dir = <cncf-runtime-checkout>.
       |  Config cncf.launcher.dev.dir selects an sbt checkout for the launcher itself.
       |  Full JSON/XML/HOCON are CNCF runtime config formats, not launcher config formats.
       |  Runtime args before server/client/command are forwarded to CncfMain.

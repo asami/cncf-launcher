@@ -8,7 +8,7 @@ import scala.util.Try
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jun. 15, 2026
+ * @version Jun. 20, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -29,7 +29,7 @@ final class CncfLauncher(
     }
     val command = CncfCommandParser.parse(commandargs)
     command match {
-      case CncfCommand.Version =>
+      case CncfCommand.LauncherVersion =>
         println(s"${LauncherBuildInfo.name} ${LauncherBuildInfo.version}")
         0
       case CncfCommand.Help =>

@@ -19,7 +19,7 @@ cncf runtime use newest
 cncf dev classpath
 cncf dev check
 cncf dev server
-cncf dev server --runtime-dev-dir ../cncf
+cncf dev server --runtime-dev-dir <cncf-runtime-checkout>
 cncf dev server --project-dev ../textus-knowledge-editor
 cncf dev server --name textus-knowledge-editor:0.1.0-SNAPSHOT
 cncf dev server --car-file target/textus-knowledge-editor-0.1.0-SNAPSHOT.car
@@ -103,7 +103,7 @@ cncf:
 
 runtime:
   version: recommended
-  dev-dir: ../cncf
+  dev-dir: <cncf-runtime-checkout>
   catalog:
     url: https://www.simplemodeling.org/repository/textus/runtime-catalog.yaml
 
