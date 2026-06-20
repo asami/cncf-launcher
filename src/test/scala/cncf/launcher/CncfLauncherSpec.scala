@@ -1,5 +1,8 @@
 package cncf.launcher
 
+import org.scalatest.GivenWhenThen
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util.zip.{ZipEntry, ZipOutputStream}
@@ -15,6 +18,7 @@ object CncfLauncherSpec {
     spec.parser()
     spec.runtimeVersion()
     spec.launcherVersion()
+    spec.runtimeHelp()
     spec.configMerge()
     spec.launcherDevDirDelegatesToDevelopmentLauncher()
     spec.configSupportsAdditionalRdfNamespaces()
@@ -80,7 +84,480 @@ object CncfLauncherSpec {
   }
 }
 
-final class CncfLauncherSpec {
+final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThen {
+  "cncf launcher" should {
+    "command parsing" which {
+      "parser" in {
+        Given("the cncf launcher scenario: parser")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        parser()
+      }
+
+      "runtime catalog parse and selector resolution" in {
+        Given("the cncf launcher scenario: runtime catalog parse and selector resolution")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeCatalogParseAndSelectorResolution()
+      }
+
+      "dev parser" in {
+        Given("the cncf launcher scenario: dev parser")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devParser()
+      }
+
+      "dev server parser supports process management options" in {
+        Given("the cncf launcher scenario: dev server parser supports process management options")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerParserSupportsProcessManagementOptions()
+      }
+
+    }
+
+    "configuration and launcher metadata" which {
+      "launcher version" in {
+        Given("the cncf launcher scenario: launcher version")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        launcherVersion()
+      }
+
+      "config merge" in {
+        Given("the cncf launcher scenario: config merge")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        configMerge()
+      }
+
+      "launcher dev dir delegates to development launcher" in {
+        Given("the cncf launcher scenario: launcher dev dir delegates to development launcher")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        launcherDevDirDelegatesToDevelopmentLauncher()
+      }
+
+      "config supports additional rdf namespaces" in {
+        Given("the cncf launcher scenario: config supports additional rdf namespaces")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        configSupportsAdditionalRdfNamespaces()
+      }
+
+      "config file option overrides project config" in {
+        Given("the cncf launcher scenario: config file option overrides project config")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        configFileOptionOverridesProjectConfig()
+      }
+
+      "launcher config supports properties and conf files" in {
+        Given("the cncf launcher scenario: launcher config supports properties and conf files")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        launcherConfigSupportsPropertiesAndConfFiles()
+      }
+
+      "default runtime config files are forwarded" in {
+        Given("the cncf launcher scenario: default runtime config files are forwarded")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        defaultRuntimeConfigFilesAreForwarded()
+      }
+
+      "config file project dev survives target cwd switch" in {
+        Given("the cncf launcher scenario: config file project dev survives target cwd switch")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        configFileProjectDevSurvivesTargetCwdSwitch()
+      }
+
+      "cncf config option is forwarded to runtime" in {
+        Given("the cncf launcher scenario: cncf config option is forwarded to runtime")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        cncfConfigOptionIsForwardedToRuntime()
+      }
+
+      "config file option requires existing file" in {
+        Given("the cncf launcher scenario: config file option requires existing file")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        configFileOptionRequiresExistingFile()
+      }
+
+      "dev config can select execution profile" in {
+        Given("the cncf launcher scenario: dev config can select execution profile")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devConfigCanSelectExecutionProfile()
+      }
+
+      "dev project loads target project config" in {
+        Given("the cncf launcher scenario: dev project loads target project config")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devProjectLoadsTargetProjectConfig()
+      }
+
+    }
+
+    "runtime selection and catalog operations" which {
+      "runtime version" in {
+        Given("the cncf launcher scenario: runtime version")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeVersion()
+      }
+
+      "runtime help" in {
+        Given("the cncf launcher scenario: runtime help")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeHelp()
+      }
+
+      "runtime version precedence" in {
+        Given("the cncf launcher scenario: runtime version precedence")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeVersionPrecedence()
+      }
+
+      "runtime use writes expected files" in {
+        Given("the cncf launcher scenario: runtime use writes expected files")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeUseWritesExpectedFiles()
+      }
+
+      "runtime use auto selects project when cncf directory exists" in {
+        Given("the cncf launcher scenario: runtime use auto selects project when cncf directory exists")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
+      }
+
+      "runtime catalog commands" in {
+        Given("the cncf launcher scenario: runtime catalog commands")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeCatalogCommands()
+      }
+
+      "runtime current warns when cached recommended is stale" in {
+        Given("the cncf launcher scenario: runtime current warns when cached recommended is stale")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeCurrentWarnsWhenCachedRecommendedIsStale()
+      }
+
+      "runtime descriptor commands" in {
+        Given("the cncf launcher scenario: runtime descriptor commands")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeDescriptorCommands()
+      }
+
+      "runtime descriptor prefers runtime jar descriptor" in {
+        Given("the cncf launcher scenario: runtime descriptor prefers runtime jar descriptor")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeDescriptorPrefersRuntimeJarDescriptor()
+      }
+
+      "runtime command does not load cncf" in {
+        Given("the cncf launcher scenario: runtime command does not load cncf")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        runtimeCommandDoesNotLoadCncf()
+      }
+
+      "latest runtime is concrete" in {
+        Given("the cncf launcher scenario: latest runtime is concrete")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        latestRuntimeIsConcrete()
+      }
+
+    }
+
+    "development runtime operations" which {
+      "dev server rewrites to cncf args" in {
+        Given("the cncf launcher scenario: dev server rewrites to cncf args")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerRewritesToCncfArgs()
+      }
+
+      "dev server writes state during invocation" in {
+        Given("the cncf launcher scenario: dev server writes state during invocation")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerWritesStateDuringInvocation()
+      }
+
+      "dev server rejects alive existing state" in {
+        Given("the cncf launcher scenario: dev server rejects alive existing state")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerRejectsAliveExistingState()
+      }
+
+      "dev server stop existing before invocation" in {
+        Given("the cncf launcher scenario: dev server stop existing before invocation")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerStopExistingBeforeInvocation()
+      }
+
+      "dev stop stops existing without invocation" in {
+        Given("the cncf launcher scenario: dev stop stops existing without invocation")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devStopStopsExistingWithoutInvocation()
+      }
+
+      "dev stop uses recorded port when port is omitted" in {
+        Given("the cncf launcher scenario: dev stop uses recorded port when port is omitted")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devStopUsesRecordedPortWhenPortIsOmitted()
+      }
+
+      "dev server force stops after graceful failure" in {
+        Given("the cncf launcher scenario: dev server force stops after graceful failure")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerForceStopsAfterGracefulFailure()
+      }
+
+      "dev server requires force for ambiguous alive state" in {
+        Given("the cncf launcher scenario: dev server requires force for ambiguous alive state")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerRequiresForceForAmbiguousAliveState()
+      }
+
+      "dev server rejects pid reuse without force" in {
+        Given("the cncf launcher scenario: dev server rejects pid reuse without force")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerRejectsPidReuseWithoutForce()
+      }
+
+      "dev server profile adds local persistent sqlite args" in {
+        Given("the cncf launcher scenario: dev server profile adds local persistent sqlite args")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerProfileAddsLocalPersistentSqliteArgs()
+      }
+
+      "dev server uses runtime development directory" in {
+        Given("the cncf launcher scenario: dev server uses runtime development directory")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerUsesRuntimeDevelopmentDirectory()
+      }
+
+      "dev server uses runtime development catalog for selection" in {
+        Given("the cncf launcher scenario: dev server uses runtime development catalog for selection")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerUsesRuntimeDevelopmentCatalogForSelection()
+      }
+
+      "dev command passes runtime leading args" in {
+        Given("the cncf launcher scenario: dev command passes runtime leading args")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCommandPassesRuntimeLeadingArgs()
+      }
+
+      "dev command keeps sample main class value as runtime arg" in {
+        Given("the cncf launcher scenario: dev command keeps sample main class value as runtime arg")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCommandKeepsSampleMainClassValueAsRuntimeArg()
+      }
+
+      "dev command can disable project classpath" in {
+        Given("the cncf launcher scenario: dev command can disable project classpath")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCommandCanDisableProjectClasspath()
+      }
+
+      "dev command can disable project component dev dir" in {
+        Given("the cncf launcher scenario: dev command can disable project component dev dir")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCommandCanDisableProjectComponentDevDir()
+      }
+
+      "dev command does not auto activate component dir artifacts" in {
+        Given("the cncf launcher scenario: dev command does not auto activate component dir artifacts")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCommandDoesNotAutoActivateComponentDirArtifacts()
+      }
+
+      "dev target options are mutually exclusive" in {
+        Given("the cncf launcher scenario: dev target options are mutually exclusive")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devTargetOptionsAreMutuallyExclusive()
+      }
+
+      "dev name target uses local snapshot only" in {
+        Given("the cncf launcher scenario: dev name target uses local snapshot only")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devNameTargetUsesLocalSnapshotOnly()
+      }
+
+      "dev name target snapshot bypasses release catalog" in {
+        Given("the cncf launcher scenario: dev name target snapshot bypasses release catalog")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devNameTargetSnapshotBypassesReleaseCatalog()
+      }
+
+      "dev name target uses release repositories" in {
+        Given("the cncf launcher scenario: dev name target uses release repositories")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devNameTargetUsesReleaseRepositories()
+      }
+
+      "dev server emulation rewrites to cncf args" in {
+        Given("the cncf launcher scenario: dev server emulation rewrites to cncf args")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerEmulationRewritesToCncfArgs()
+      }
+
+      "dev help explains resolution model" in {
+        Given("the cncf launcher scenario: dev help explains resolution model")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devHelpExplainsResolutionModel()
+      }
+
+      "dev check reports main target and dependency resolution" in {
+        Given("the cncf launcher scenario: dev check reports main target and dependency resolution")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCheckReportsMainTargetAndDependencyResolution()
+      }
+
+      "dev check reports dev server state" in {
+        Given("the cncf launcher scenario: dev check reports dev server state")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCheckReportsDevServerState()
+      }
+
+      "dev check treats missing main target classpath as warning" in {
+        Given("the cncf launcher scenario: dev check treats missing main target classpath as warning")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCheckTreatsMissingMainTargetClasspathAsWarning()
+      }
+
+      "dev check treats missing dependency classpath as error" in {
+        Given("the cncf launcher scenario: dev check treats missing dependency classpath as error")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCheckTreatsMissingDependencyClasspathAsError()
+      }
+
+      "dev server auto generates main target classpath" in {
+        Given("the cncf launcher scenario: dev server auto generates main target classpath")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerAutoGeneratesMainTargetClasspath()
+      }
+
+      "dev server reports main target classpath export failure" in {
+        Given("the cncf launcher scenario: dev server reports main target classpath export failure")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devServerReportsMainTargetClasspathExportFailure()
+      }
+
+      "dev uses current compatible runtime by default" in {
+        Given("the cncf launcher scenario: dev uses current compatible runtime by default")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devUsesCurrentCompatibleRuntimeByDefault()
+      }
+
+      "dev can select latest tested runtime" in {
+        Given("the cncf launcher scenario: dev can select latest tested runtime")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCanSelectLatestTestedRuntime()
+      }
+
+      "dev can select latest compatible runtime" in {
+        Given("the cncf launcher scenario: dev can select latest compatible runtime")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCanSelectLatestCompatibleRuntime()
+      }
+
+      "dev can select newest compatible runtime" in {
+        Given("the cncf launcher scenario: dev can select newest compatible runtime")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devCanSelectNewestCompatibleRuntime()
+      }
+
+      "dev parses inline runtime requirement lists" in {
+        Given("the cncf launcher scenario: dev parses inline runtime requirement lists")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devParsesInlineRuntimeRequirementLists()
+      }
+
+      "dev selects common runtime across project and dependency" in {
+        Given("the cncf launcher scenario: dev selects common runtime across project and dependency")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devSelectsCommonRuntimeAcrossProjectAndDependency()
+      }
+
+      "dev runtime conflict defaults to error" in {
+        Given("the cncf launcher scenario: dev runtime conflict defaults to error")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devRuntimeConflictDefaultsToError()
+      }
+
+      "dev runtime conflict can use newest policy" in {
+        Given("the cncf launcher scenario: dev runtime conflict can use newest policy")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        devRuntimeConflictCanUseNewestPolicy()
+      }
+
+    }
+
+    "packaging boundaries" which {
+      "no runtime library dependencies" in {
+        Given("the cncf launcher scenario: no runtime library dependencies")
+        When("the launcher behavior is exercised")
+        Then("the executable specification holds through scenario-specific expectations")
+        noRuntimeLibraryDependencies()
+      }
+
+    }
+
+  }
+
   def parser(): Unit = {
     val autouse = CncfCommandParser.parse(Vector("runtime", "use", "latest"))
       .asInstanceOf[CncfCommand.Runtime.Use]
@@ -109,6 +586,21 @@ final class CncfLauncherSpec {
     _assert_equals(output.trim, s"cncf ${LauncherBuildInfo.version}")
     _assert_equals(CncfCommandParser.parse(Vector("launcher", "version")), CncfCommand.LauncherVersion)
     _assert_equals(CncfCommandParser.parse(Vector("launcher", "--version")), CncfCommand.LauncherVersion)
+  }
+
+  def runtimeHelp(): Unit = _with_temp_paths { paths =>
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    val (code, output) = _capture_stdout {
+      launcher.run(Vector("help"))
+    }
+    _assert_equals(code, 0)
+    _assert_equals(invoker.lastArgs, Vector("--help"))
+    output.contains("Launcher help:") shouldBe true
+    output.contains("cncf launcher version") shouldBe true
+    _assert_equals(CncfCommandParser.parse(Vector("help")), CncfCommand.RuntimeHelp)
+    _assert_equals(CncfCommandParser.parse(Vector("--help")), CncfCommand.RuntimeHelp)
+    _assert_equals(CncfCommandParser.parse(Vector("launcher", "help")), CncfCommand.LauncherHelp)
   }
 
   def configMerge(): Unit = _with_temp_paths { paths =>
@@ -162,15 +654,15 @@ final class CncfLauncherSpec {
     _assert_equals(config.devProjectDev, Some("."))
     _assert_equals(config.devPort, Some("19000"))
     _assert_equals(config.devComponentDevDirs, Vector("../local-component", "../project-component", "../shared-component", "../global-component"))
-    assert(config.carRepositories.head == "https://local.example/car")
-    assert(config.carRepositories(1) == "https://project.example/car")
-    assert(config.carRepositories(2) == "https://global.example/car")
-    assert(config.sarRepositories.head == "https://global.example/sar")
-    assert(config.carRepositories.contains(paths.localCarRepository.toString))
-    assert(config.sarRepositories.contains(paths.localSarRepository.toString))
-    assert(config.carRepositories.contains(paths.cacheCarRepository.toString))
-    assert(config.sarRepositories.contains(paths.cacheSarRepository.toString))
-    assert(config.carRepositories.contains("https://www.simplemodeling.org/repository/car"))
+    config.carRepositories.head == "https://local.example/car" shouldBe true
+    config.carRepositories(1) == "https://project.example/car" shouldBe true
+    config.carRepositories(2) == "https://global.example/car" shouldBe true
+    config.sarRepositories.head == "https://global.example/sar" shouldBe true
+    config.carRepositories.contains(paths.localCarRepository.toString) shouldBe true
+    config.sarRepositories.contains(paths.localSarRepository.toString) shouldBe true
+    config.carRepositories.contains(paths.cacheCarRepository.toString) shouldBe true
+    config.sarRepositories.contains(paths.cacheSarRepository.toString) shouldBe true
+    config.carRepositories.contains("https://www.simplemodeling.org/repository/car") shouldBe true
   }
 
   def launcherDevDirDelegatesToDevelopmentLauncher(): Unit = _with_temp_paths { paths =>
@@ -218,16 +710,16 @@ final class CncfLauncherSpec {
     val config = LauncherConfig.load(paths)
     _assert_equals(config.textusKnowledgeRdfNodePrefix, Some("acme"))
     _assert_equals(config.textusKnowledgeRdfNamespacePrefixes, Some("acme,sm"))
-    assert(config.textusKnowledgeRdfNamespaces.contains("acme" -> "https://example.com/acme"))
-    assert(config.textusKnowledgeRdfNamespaces.contains("sm" -> "https://www.simplemodeling.org"))
+    config.textusKnowledgeRdfNamespaces.contains("acme" -> "https://example.com/acme") shouldBe true
+    config.textusKnowledgeRdfNamespaces.contains("sm" -> "https://www.simplemodeling.org") shouldBe true
 
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     launcher.run(Vector("dev", "server"))
-    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.node-prefix=acme"))
-    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.namespace-prefixes=acme,sm"))
-    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.namespaces.acme=https://example.com/acme"))
-    assert(invoker.lastArgs.contains("--textus.knowledge.rdf.namespaces.sm=https://www.simplemodeling.org"))
+    invoker.lastArgs.contains("--textus.knowledge.rdf.node-prefix=acme") shouldBe true
+    invoker.lastArgs.contains("--textus.knowledge.rdf.namespace-prefixes=acme,sm") shouldBe true
+    invoker.lastArgs.contains("--textus.knowledge.rdf.namespaces.acme=https://example.com/acme") shouldBe true
+    invoker.lastArgs.contains("--textus.knowledge.rdf.namespaces.sm=https://www.simplemodeling.org") shouldBe true
   }
 
   def configFileOptionOverridesProjectConfig(): Unit = _with_temp_paths { paths =>
@@ -253,8 +745,8 @@ final class CncfLauncherSpec {
     launcher.run(Vector("--config", "etc/debug.yaml", "dev", "server"))
 
     _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
-    assert(!invoker.lastArgs.contains("--config"))
-    assert(!invoker.lastArgs.contains("etc/debug.yaml"))
+    invoker.lastArgs.contains("--config") shouldBe false
+    invoker.lastArgs.contains("etc/debug.yaml") shouldBe false
   }
 
   def launcherConfigSupportsPropertiesAndConfFiles(): Unit = _with_temp_paths { paths =>
@@ -276,8 +768,8 @@ final class CncfLauncherSpec {
     launcher.run(Vector("--config", "etc/launcher.properties", "--config", "etc/launcher.conf", "dev", "server"))
 
     _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
-    assert(invoker.lastArgs.exists(_.startsWith("--cncf.config.files=")))
-    assert(invoker.lastArgs.exists(_.contains("runtime-debug.yaml")))
+    invoker.lastArgs.exists(_.startsWith("--cncf.config.files=")) shouldBe true
+    invoker.lastArgs.exists(_.contains("runtime-debug.yaml")) shouldBe true
   }
 
   def defaultRuntimeConfigFilesAreForwarded(): Unit = _with_temp_paths { paths =>
@@ -301,7 +793,7 @@ final class CncfLauncherSpec {
       paths.projectLocalRuntimeConfig.toAbsolutePath.normalize.toString,
       paths.cwd.resolve("etc").resolve("runtime-extra.yaml").toAbsolutePath.normalize.toString
     ))
-    assert(!invoker.lastArgs.contains("--cncf-config"))
+    invoker.lastArgs.contains("--cncf-config") shouldBe false
   }
 
   def configFileProjectDevSurvivesTargetCwdSwitch(): Unit = _with_temp_paths { paths =>
@@ -321,9 +813,9 @@ final class CncfLauncherSpec {
 
     launcher.run(Vector("--config", "etc/debug.yaml", "dev", "server"))
 
-    assert(invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString))
-    assert(!invoker.lastArgs.contains("--config"))
-    assert(!invoker.lastArgs.contains("etc/debug.yaml"))
+    invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString) shouldBe true
+    invoker.lastArgs.contains("--config") shouldBe false
+    invoker.lastArgs.contains("etc/debug.yaml") shouldBe false
   }
 
   def cncfConfigOptionIsForwardedToRuntime(): Unit = _with_temp_paths { paths =>
@@ -341,10 +833,10 @@ final class CncfLauncherSpec {
 
     launcher.run(Vector("--cncf-config", "etc/runtime-debug.yaml", "dev", "server"))
 
-    assert(invoker.lastArgs.exists(_.startsWith("--cncf.config.files=")))
-    assert(invoker.lastArgs.exists(_.contains("runtime-debug.yaml")))
-    assert(!invoker.lastArgs.contains("--cncf-config"))
-    assert(!invoker.lastArgs.contains("etc/runtime-debug.yaml"))
+    invoker.lastArgs.exists(_.startsWith("--cncf.config.files=")) shouldBe true
+    invoker.lastArgs.exists(_.contains("runtime-debug.yaml")) shouldBe true
+    invoker.lastArgs.contains("--cncf-config") shouldBe false
+    invoker.lastArgs.contains("etc/runtime-debug.yaml") shouldBe false
   }
 
   def configFileOptionRequiresExistingFile(): Unit = _with_temp_paths { paths =>
@@ -358,7 +850,7 @@ final class CncfLauncherSpec {
           e.getMessage.contains("launcher config file not found") &&
             e.getMessage.contains("etc/missing.conf")
       }
-    assert(failed)
+    failed shouldBe true
   }
 
   def runtimeVersionPrecedence(): Unit = _with_temp_paths { paths =>
@@ -387,7 +879,7 @@ final class CncfLauncherSpec {
     val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
     launcher.run(Vector("runtime", "use", "latest"))
     _assert_equals(Files.readString(paths.projectVersion).trim, "latest")
-    assert(!Files.isRegularFile(paths.globalVersion))
+    Files.isRegularFile(paths.globalVersion) shouldBe false
   }
 
   def runtimeCatalogParseAndSelectorResolution(): Unit = {
@@ -405,7 +897,7 @@ final class CncfLauncherSpec {
       } catch {
         case e: CncfException => e.getMessage.contains("disabled")
       }
-    assert(disabled)
+    disabled shouldBe true
   }
 
   def runtimeCatalogCommands(): Unit = _with_temp_paths { paths =>
@@ -418,7 +910,7 @@ final class CncfLauncherSpec {
          |""".stripMargin)
     val launcher = new CncfLauncher(paths, CoursierCncfRuntimeResolver("false"), FakeInvoker())
     launcher.run(Vector("runtime", "refresh"))
-    assert(Files.isRegularFile(paths.runtimeCatalog))
+    Files.isRegularFile(paths.runtimeCatalog) shouldBe true
     launcher.run(Vector("runtime", "remote", "list"))
     launcher.run(Vector("runtime", "catalog", "show"))
     launcher.run(Vector("runtime", "channels"))
@@ -444,9 +936,9 @@ final class CncfLauncherSpec {
 
     _assert_equals(code, 0)
     _assert_equals(stdout.trim, "0.2.0")
-    assert(stderr.contains("cached CNCF runtime catalog resolves recommended to 0.2.0"))
-    assert(stderr.contains("remote catalog resolves it to 0.3.0-SNAPSHOT"))
-    assert(stderr.contains("cncf runtime refresh"))
+    stderr.contains("cached CNCF runtime catalog resolves recommended to 0.2.0") shouldBe true
+    stderr.contains("remote catalog resolves it to 0.3.0-SNAPSHOT") shouldBe true
+    stderr.contains("cncf runtime refresh") shouldBe true
   }
 
   def runtimeDescriptorCommands(): Unit = _with_temp_paths { paths =>
@@ -461,17 +953,17 @@ final class CncfLauncherSpec {
     val (_, descriptor) = _capture_stdout {
       launcher.run(Vector("runtime", "descriptor", "--format", "yaml"))
     }
-    assert(descriptor.contains("runtime: cncf"))
-    assert(descriptor.contains("version: 0.2.0"))
-    assert(descriptor.contains("module: org.goldenport:goldenport-cncf_3:0.2.0"))
-    assert(descriptor.contains("baseProvided:"))
-    assert(descriptor.contains("org.typelevel:cats-core_3"))
+    descriptor.contains("runtime: cncf") shouldBe true
+    descriptor.contains("version: 0.2.0") shouldBe true
+    descriptor.contains("module: org.goldenport:goldenport-cncf_3:0.2.0") shouldBe true
+    descriptor.contains("baseProvided:") shouldBe true
+    descriptor.contains("org.typelevel:cats-core_3") shouldBe true
 
     val (_, baseprovided) = _capture_stdout {
       launcher.run(Vector("runtime", "base-provided", "--format=yaml"))
     }
-    assert(baseprovided.contains("baseProvided:"))
-    assert(baseprovided.contains("org.goldenport:goldenport-cncf_3"))
+    baseprovided.contains("baseProvided:") shouldBe true
+    baseprovided.contains("org.goldenport:goldenport-cncf_3") shouldBe true
   }
 
   def runtimeDescriptorPrefersRuntimeJarDescriptor(): Unit = _with_temp_paths { paths =>
@@ -505,10 +997,10 @@ final class CncfLauncherSpec {
       launcher.run(Vector("runtime", "base-provided"))
     }
 
-    assert(descriptor.contains("org.typelevel:spire_3"))
-    assert(!descriptor.contains("org.typelevel:cats-core_3"))
-    assert(baseprovided.contains("org.typelevel:spire_3"))
-    assert(!baseprovided.contains("org.typelevel:cats-core_3"))
+    descriptor.contains("org.typelevel:spire_3") shouldBe true
+    descriptor.contains("org.typelevel:cats-core_3") shouldBe false
+    baseprovided.contains("org.typelevel:spire_3") shouldBe true
+    baseprovided.contains("org.typelevel:cats-core_3") shouldBe false
   }
 
   def devParser(): Unit = {
@@ -592,8 +1084,8 @@ final class CncfLauncherSpec {
       "--component-dev-dir",
       paths.cwd.getParent.resolve("account").toAbsolutePath.normalize.toString
     ))
-    assert(invoker.lastArgs.contains("server"))
-    assert(invoker.lastClasspath.contains(classdir))
+    invoker.lastArgs.contains("server") shouldBe true
+    invoker.lastClasspath.contains(classdir) shouldBe true
   }
 
   def devServerWritesStateDuringInvocation(): Unit = _with_temp_paths { paths =>
@@ -605,19 +1097,19 @@ final class CncfLauncherSpec {
     invoker.onInvoke = () => {
       val pidfile = DevSupport.devServerPidFile(paths.cwd)
       val jsonfile = DevSupport.devServerJsonFile(paths.cwd)
-      assert(Files.isRegularFile(pidfile))
-      assert(Files.isRegularFile(jsonfile))
+      Files.isRegularFile(pidfile) shouldBe true
+      Files.isRegularFile(jsonfile) shouldBe true
       _assert_equals(Files.readString(pidfile).trim, "1234")
       val json = Files.readString(jsonfile)
-      assert(json.contains(""""port": "19601""""))
-      assert(json.contains(""""project": """))
+      json.contains(""""port": "19601"""") shouldBe true
+      json.contains(""""project": """) shouldBe true
     }
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker, SbtRuntimeClasspathExporter, processmanager)
 
     launcher.run(Vector("dev", "server", "--port", "19601"))
 
-    assert(!Files.exists(DevSupport.devServerPidFile(paths.cwd)))
-    assert(!Files.exists(DevSupport.devServerJsonFile(paths.cwd)))
+    Files.exists(DevSupport.devServerPidFile(paths.cwd)) shouldBe false
+    Files.exists(DevSupport.devServerJsonFile(paths.cwd)) shouldBe false
   }
 
   def devServerRejectsAliveExistingState(): Unit = _with_temp_paths { paths =>
@@ -635,7 +1127,7 @@ final class CncfLauncherSpec {
       } catch {
         case e: CncfException => e.getMessage.contains("dev server already running") && e.getMessage.contains("--restart")
       }
-    assert(failed)
+    failed shouldBe true
   }
 
   def devServerStopExistingBeforeInvocation(): Unit = _with_temp_paths { paths =>
@@ -651,7 +1143,7 @@ final class CncfLauncherSpec {
     launcher.run(Vector("dev", "server", "--port", "19603", "--stop-existing"))
 
     _assert_equals(processmanager.gracefulStopped, Vector(2223L))
-    assert(invoker.lastArgs.contains("server"))
+    invoker.lastArgs.contains("server") shouldBe true
   }
 
   def devStopStopsExistingWithoutInvocation(): Unit = _with_temp_paths { paths =>
@@ -665,7 +1157,7 @@ final class CncfLauncherSpec {
 
     _assert_equals(processmanager.gracefulStopped, Vector(2224L))
     _assert_equals(invoker.lastArgs, Vector.empty)
-    assert(!Files.exists(DevSupport.devServerJsonFile(paths.cwd)))
+    Files.exists(DevSupport.devServerJsonFile(paths.cwd)) shouldBe false
   }
 
   def devStopUsesRecordedPortWhenPortIsOmitted(): Unit = _with_temp_paths { paths =>
@@ -711,7 +1203,7 @@ final class CncfLauncherSpec {
         case e: CncfException => e.getMessage.contains("state is ambiguous") && e.getMessage.contains("--force-existing")
       }
 
-    assert(failed)
+    failed shouldBe true
   }
 
   def devServerRejectsPidReuseWithoutForce(): Unit = _with_temp_paths { paths =>
@@ -731,7 +1223,7 @@ final class CncfLauncherSpec {
         case e: CncfException => e.getMessage.contains("state is ambiguous") && e.getMessage.contains("--force-existing")
       }
 
-    assert(failed)
+    failed shouldBe true
   }
 
   def devServerProfileAddsLocalPersistentSqliteArgs(): Unit = _with_temp_paths { paths =>
@@ -744,10 +1236,10 @@ final class CncfLauncherSpec {
     launcher.run(Vector("dev", "server", "--profile", "local-persistent"))
 
     val sqlitepath = paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime.sqlite").toAbsolutePath.normalize.toString
-    assert(invoker.lastArgs.contains(s"--textus.datastore.sqlite.path=$sqlitepath"))
-    assert(invoker.lastArgs.contains(s"--cncf.datastore.sqlite.path=$sqlitepath"))
-    assert(invoker.lastArgs.contains("--textus.datastore.sqlite.normalize-column-names=true"))
-    assert(Files.isDirectory(paths.cwd.resolve("target").resolve("cncf.d")))
+    invoker.lastArgs.contains(s"--textus.datastore.sqlite.path=$sqlitepath") shouldBe true
+    invoker.lastArgs.contains(s"--cncf.datastore.sqlite.path=$sqlitepath") shouldBe true
+    invoker.lastArgs.contains("--textus.datastore.sqlite.normalize-column-names=true") shouldBe true
+    Files.isDirectory(paths.cwd.resolve("target").resolve("cncf.d")) shouldBe true
   }
 
   def devConfigCanSelectExecutionProfile(): Unit = _with_temp_paths { paths =>
@@ -763,7 +1255,7 @@ final class CncfLauncherSpec {
 
     launcher.run(Vector("dev", "server"))
 
-    assert(invoker.lastArgs.exists(_.startsWith("--textus.datastore.sqlite.path=")))
+    invoker.lastArgs.exists(_.startsWith("--textus.datastore.sqlite.path=")) shouldBe true
   }
 
   def devServerUsesRuntimeDevelopmentDirectory(): Unit = _with_temp_paths { paths =>
@@ -779,8 +1271,8 @@ final class CncfLauncherSpec {
     val launcher = new CncfLauncher(paths, resolver, invoker)
     launcher.run(Vector("dev", "server", "--runtime-dev-dir", "cncf-runtime"))
     _assert_equals(resolver.resolvedClasspaths, Vector.empty)
-    assert(invoker.lastClasspath.contains(runtimeclassdir))
-    assert(invoker.lastClasspath.contains(appclassdir))
+    invoker.lastClasspath.contains(runtimeclassdir) shouldBe true
+    invoker.lastClasspath.contains(appclassdir) shouldBe true
   }
 
   def devServerUsesRuntimeDevelopmentCatalogForSelection(): Unit = _with_temp_paths { paths =>
@@ -800,8 +1292,8 @@ final class CncfLauncherSpec {
     launcher.run(Vector("--runtime", "0.4.10-SNAPSHOT", "dev", "server", "--runtime-dev-dir", "cncf-runtime"))
 
     _assert_equals(resolver.resolvedClasspaths, Vector.empty)
-    assert(invoker.lastClasspath.contains(runtimeclassdir))
-    assert(invoker.lastClasspath.contains(appclassdir))
+    invoker.lastClasspath.contains(runtimeclassdir) shouldBe true
+    invoker.lastClasspath.contains(appclassdir) shouldBe true
   }
 
   def devCommandPassesRuntimeLeadingArgs(): Unit = _with_temp_paths { paths =>
@@ -819,7 +1311,7 @@ final class CncfLauncherSpec {
       "--format", "yaml"
     ))
     val commandindex = invoker.lastArgs.indexOf("command")
-    assert(commandindex > 0)
+    commandindex > 0 shouldBe true
     _assert_equals(invoker.lastArgs.slice(commandindex - 5, commandindex), Vector(
       "--repository-dir", "repository.d",
       "--component-car-dir", "car.d",
@@ -840,7 +1332,7 @@ final class CncfLauncherSpec {
       "minimal.main.hello"
     ))
     val commandindex = invoker.lastArgs.indexOf("command")
-    assert(commandindex > 0)
+    commandindex > 0 shouldBe true
     _assert_equals(invoker.lastArgs.slice(commandindex - 2, commandindex), Vector(
       "--sample-main-class", "sample.Main"
     ))
@@ -852,8 +1344,8 @@ final class CncfLauncherSpec {
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     val code = launcher.run(Vector("dev", "command", "--no-project-classpath", "--repository-dir", "repository.d", "minimal.main.hello"))
     _assert_equals(code, 0)
-    assert(invoker.lastArgs.contains("--repository-dir"))
-    assert(!invoker.lastArgs.contains(paths.cwd.toAbsolutePath.normalize.toString))
+    invoker.lastArgs.contains("--repository-dir") shouldBe true
+    invoker.lastArgs.contains(paths.cwd.toAbsolutePath.normalize.toString) shouldBe false
   }
 
   def devCommandCanDisableProjectComponentDevDir(): Unit = _with_temp_paths { paths =>
@@ -864,9 +1356,9 @@ final class CncfLauncherSpec {
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     val code = launcher.run(Vector("dev", "command", "--no-project-component-dev-dir", "--discover=classes", "minimal.main.hello"))
     _assert_equals(code, 0)
-    assert(invoker.lastClasspath.contains(classdir))
-    assert(!invoker.lastArgs.contains("--component-dev-dir"))
-    assert(invoker.lastArgs.contains("--discover=classes"))
+    invoker.lastClasspath.contains(classdir) shouldBe true
+    invoker.lastArgs.contains("--component-dev-dir") shouldBe false
+    invoker.lastArgs.contains("--discover=classes") shouldBe true
   }
 
 
@@ -879,9 +1371,9 @@ final class CncfLauncherSpec {
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     val code = launcher.run(Vector("dev", "command", "testcomp.main.hello"))
     _assert_equals(code, 0)
-    assert(!invoker.lastArgs.contains("--component-dir"))
-    assert(invoker.lastArgs.contains("--component-dev-dir"))
-    assert(invoker.lastClasspath.contains(classdir))
+    invoker.lastArgs.contains("--component-dir") shouldBe false
+    invoker.lastArgs.contains("--component-dev-dir") shouldBe true
+    invoker.lastClasspath.contains(classdir) shouldBe true
   }
 
   def devTargetOptionsAreMutuallyExclusive(): Unit = {
@@ -892,7 +1384,7 @@ final class CncfLauncherSpec {
       } catch {
         case e: CncfException => e.getMessage.contains("mutually exclusive")
       }
-    assert(failed)
+    failed shouldBe true
     val oldproject =
       try {
         CncfCommandParser.parse(Vector("dev", "server", "--project", "app"))
@@ -900,7 +1392,7 @@ final class CncfLauncherSpec {
       } catch {
         case e: CncfException => e.getMessage.contains("--project is no longer supported")
       }
-    assert(oldproject)
+    oldproject shouldBe true
   }
 
   def devNameTargetUsesLocalSnapshotOnly(): Unit = _with_temp_paths { paths =>
@@ -913,10 +1405,10 @@ final class CncfLauncherSpec {
 
     launcher.run(Vector("dev", "server", "--name", s"$name:$version"))
 
-    assert(invoker.lastArgs.contains(s"--textus.component=$name"))
-    assert(invoker.lastArgs.contains(s"--textus.component.version=$version"))
-    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}"))
-    assert(!invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}"))
+    invoker.lastArgs.contains(s"--textus.component=$name") shouldBe true
+    invoker.lastArgs.contains(s"--textus.component.version=$version") shouldBe true
+    invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}") shouldBe true
+    invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}") shouldBe false
   }
 
   def devNameTargetSnapshotBypassesReleaseCatalog(): Unit = _with_temp_paths { paths =>
@@ -944,9 +1436,9 @@ final class CncfLauncherSpec {
 
     launcher.run(Vector("dev", "server", "--name", s"$name:$snapshotversion"))
 
-    assert(invoker.lastArgs.contains(s"--textus.component=$name"))
-    assert(invoker.lastArgs.contains(s"--textus.component.version=$snapshotversion"))
-    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}"))
+    invoker.lastArgs.contains(s"--textus.component=$name") shouldBe true
+    invoker.lastArgs.contains(s"--textus.component.version=$snapshotversion") shouldBe true
+    invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}") shouldBe true
   }
 
   def devNameTargetUsesReleaseRepositories(): Unit = _with_temp_paths { paths =>
@@ -958,10 +1450,10 @@ final class CncfLauncherSpec {
 
     launcher.run(Vector("dev", "server", "--name", s"$name:$version"))
 
-    assert(invoker.lastArgs.contains(s"--textus.component=$name"))
-    assert(invoker.lastArgs.contains(s"--textus.component.version=$version"))
-    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}"))
-    assert(invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}"))
+    invoker.lastArgs.contains(s"--textus.component=$name") shouldBe true
+    invoker.lastArgs.contains(s"--textus.component.version=$version") shouldBe true
+    invoker.lastArgs.contains(s"--repository-dir=${paths.localCarRepository}") shouldBe true
+    invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}") shouldBe true
   }
 
   def devServerEmulationRewritesToCncfArgs(): Unit = _with_temp_paths { paths =>
@@ -977,8 +1469,8 @@ final class CncfLauncherSpec {
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     launcher.run(Vector("dev", "server-emulation", "blog.component.search"))
-    assert(invoker.lastArgs.contains("server-emulator"))
-    assert(invoker.lastArgs.contains("blog.component.search"))
+    invoker.lastArgs.contains("server-emulator") shouldBe true
+    invoker.lastArgs.contains("blog.component.search") shouldBe true
   }
 
   def devProjectLoadsTargetProjectConfig(): Unit = _with_temp_paths { paths =>
@@ -997,28 +1489,28 @@ final class CncfLauncherSpec {
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     launcher.run(Vector("dev", "server", "--project-dev", "blog"))
-    assert(invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString))
-    assert(!invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")))
+    invoker.lastArgs.contains(project.toAbsolutePath.normalize.toString) shouldBe true
+    invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")) shouldBe false
   }
 
   def devHelpExplainsResolutionModel(): Unit = {
     val help = CncfCommandParser.helpText
-    assert(help.contains("Development resolution:"))
-    assert(help.contains("defaults to --project-dev ."))
-    assert(help.contains("--name <artifact>[:<version>]"))
-    assert(help.contains("--car-file <file>"))
-    assert(help.contains("--project-car <dir>"))
-    assert(help.contains("repository lookup is disabled"))
-    assert(help.contains("--component-dev-dir <dir> is a dependency component local override"))
-    assert(help.contains("cozyPublishLocalCar"))
-    assert(help.contains("~/.cncf/local is developer local publish state"))
-    assert(help.contains("Snapshot components are local-only"))
-    assert(help.contains("component.d and repository.d are not used implicitly"))
-    assert(help.contains("cncf dev stop"))
-    assert(help.contains("--stop-existing"))
-    assert(help.contains("dev-server.pid"))
-    assert(help.contains("descriptor source metadata lives under src/main/web-inf"))
-    assert(help.contains("textus server <artifact> is the CAR/SAR artifact launcher"))
+    help.contains("Development resolution:") shouldBe true
+    help.contains("defaults to --project-dev .") shouldBe true
+    help.contains("--name <artifact>[:<version>]") shouldBe true
+    help.contains("--car-file <file>") shouldBe true
+    help.contains("--project-car <dir>") shouldBe true
+    help.contains("repository lookup is disabled") shouldBe true
+    help.contains("--component-dev-dir <dir> is a dependency component local override") shouldBe true
+    help.contains("cozyPublishLocalCar") shouldBe true
+    help.contains("~/.cncf/local is developer local publish state") shouldBe true
+    help.contains("Snapshot components are local-only") shouldBe true
+    help.contains("component.d and repository.d are not used implicitly") shouldBe true
+    help.contains("cncf dev stop") shouldBe true
+    help.contains("--stop-existing") shouldBe true
+    help.contains("dev-server.pid") shouldBe true
+    help.contains("descriptor source metadata lives under src/main/web-inf") shouldBe true
+    help.contains("textus server <artifact> is the CAR/SAR artifact launcher") shouldBe true
   }
 
   def devCheckReportsMainTargetAndDependencyResolution(): Unit = _with_temp_paths { paths =>
@@ -1027,15 +1519,15 @@ final class CncfLauncherSpec {
       launcher.run(Vector("dev", "check"))
     }
     _assert_equals(code, 0)
-    assert(output.contains("dev-target mode=project-dev"))
-    assert(output.contains("main-target source=local-project"))
-    assert(output.contains("main-target-repository-lookup disabled in project-dev mode"))
-    assert(output.contains("dependency-components local dev overrides"))
-    assert(output.contains("local-repository"))
-    assert(output.contains(paths.localRepository.toString))
-    assert(output.contains("cache-repository"))
-    assert(output.contains("status=not-created"))
-    assert(output.contains("web-descriptor-source none; use src/main/web-inf/web.yaml|form.yaml|admin.yaml"))
+    output.contains("dev-target mode=project-dev") shouldBe true
+    output.contains("main-target source=local-project") shouldBe true
+    output.contains("main-target-repository-lookup disabled in project-dev mode") shouldBe true
+    output.contains("dependency-components local dev overrides") shouldBe true
+    output.contains("local-repository") shouldBe true
+    output.contains(paths.localRepository.toString) shouldBe true
+    output.contains("cache-repository") shouldBe true
+    output.contains("status=not-created") shouldBe true
+    output.contains("web-descriptor-source none; use src/main/web-inf/web.yaml|form.yaml|admin.yaml") shouldBe true
   }
 
   def devCheckReportsDevServerState(): Unit = _with_temp_paths { paths =>
@@ -1048,10 +1540,10 @@ final class CncfLauncherSpec {
     }
 
     _assert_equals(code, 0)
-    assert(output.contains("dev-server"))
-    assert(output.contains("pid=2230"))
-    assert(output.contains("status=alive"))
-    assert(output.contains("port=19610"))
+    output.contains("dev-server") shouldBe true
+    output.contains("pid=2230") shouldBe true
+    output.contains("status=alive") shouldBe true
+    output.contains("port=19610") shouldBe true
   }
 
   def devCheckTreatsMissingMainTargetClasspathAsWarning(): Unit = _with_temp_paths { paths =>
@@ -1060,9 +1552,9 @@ final class CncfLauncherSpec {
       launcher.run(Vector("dev", "check"))
     }
     _assert_equals(code, 0)
-    assert(output.contains("WARN"))
-    assert(output.contains("runtime-classpath"))
-    assert(output.contains("dev server will run cncf dev classpath automatically"))
+    output.contains("WARN") shouldBe true
+    output.contains("runtime-classpath") shouldBe true
+    output.contains("dev server will run cncf dev classpath automatically") shouldBe true
   }
 
   def devCheckTreatsMissingDependencyClasspathAsError(): Unit = _with_temp_paths { paths =>
@@ -1072,9 +1564,9 @@ final class CncfLauncherSpec {
       launcher.run(Vector("dev", "check", "--component-dev-dir", "../account"))
     }
     _assert_equals(code, 2)
-    assert(output.contains("ERROR"))
-    assert(output.contains("dependency-component-dev-dir"))
-    assert(output.contains("run cncf dev classpath --project-dev"))
+    output.contains("ERROR") shouldBe true
+    output.contains("dependency-component-dev-dir") shouldBe true
+    output.contains("run cncf dev classpath --project-dev") shouldBe true
   }
 
   def devServerAutoGeneratesMainTargetClasspath(): Unit = _with_temp_paths { paths =>
@@ -1088,10 +1580,10 @@ final class CncfLauncherSpec {
 
     _assert_equals(code, 0)
     _assert_equals(exporter.projects, Vector(paths.cwd))
-    assert(Files.isRegularFile(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")))
-    assert(invoker.lastClasspath.contains(classdir))
-    assert(invoker.lastArgs.contains("--component-dev-dir"))
-    assert(invoker.lastArgs.contains(paths.cwd.toString))
+    Files.isRegularFile(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")) shouldBe true
+    invoker.lastClasspath.contains(classdir) shouldBe true
+    invoker.lastArgs.contains("--component-dev-dir") shouldBe true
+    invoker.lastArgs.contains(paths.cwd.toString) shouldBe true
   }
 
   def devServerReportsMainTargetClasspathExportFailure(): Unit = _with_temp_paths { paths =>
@@ -1107,7 +1599,7 @@ final class CncfLauncherSpec {
             e.getMessage.contains("run cncf dev classpath --project-dev") &&
             e.getMessage.contains("sbt failed")
       }
-    assert(failed)
+    failed shouldBe true
   }
 
   def devUsesCurrentCompatibleRuntimeByDefault(): Unit = _with_temp_paths { paths =>
@@ -1259,7 +1751,7 @@ final class CncfLauncherSpec {
       } catch {
         case e: CncfException => e.getMessage.contains("no compatible CNCF runtime version")
       }
-    assert(failed)
+    failed shouldBe true
   }
 
   def devRuntimeConflictCanUseNewestPolicy(): Unit = _with_temp_paths { paths =>
@@ -1304,9 +1796,11 @@ final class CncfLauncherSpec {
   }
 
   def noRuntimeLibraryDependencies(): Unit = {
-    val build = Files.readString(Path.of("build.sbt"))
-    assert(!build.contains("libraryDependencies +="))
-    assert(!build.contains("libraryDependencies ++="))
+    val lines = Files.readString(Path.of("build.sbt")).linesIterator.toVector.map(_.trim)
+    def _runtime_library_dependency_(line: String): Boolean =
+      line.startsWith("libraryDependencies +=") && !line.contains("% Test") && !line.contains("% \"test\"")
+    lines.exists(_runtime_library_dependency_) shouldBe false
+    lines.exists(_.startsWith("libraryDependencies ++=")) shouldBe false
   }
 
   private def _capture_stdout(f: => Int): (Int, String) = {
@@ -1381,7 +1875,7 @@ final class CncfLauncherSpec {
   }
 
   private def _assert_equals[A](actual: A, expected: A): Unit =
-    assert(actual == expected, s"expected=$expected actual=$actual")
+    actual shouldBe expected
 
   private val _catalog_text: String =
     """schemaVersion: 1

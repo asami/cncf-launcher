@@ -87,7 +87,8 @@ object CncfCommand {
   }
 
   case object LauncherVersion extends CncfCommand
-  case object Help extends CncfCommand
+  case object RuntimeHelp extends CncfCommand
+  case object LauncherHelp extends CncfCommand
 }
 
 object CncfCommandParser {
@@ -96,8 +97,10 @@ object CncfCommandParser {
       CncfCommand.Runtime.Current
     } else if (args == Vector("launcher", "version") || args == Vector("launcher", "--version")) {
       CncfCommand.LauncherVersion
-    } else if (args.isEmpty || args.contains("--help") || args.contains("-h")) {
-      CncfCommand.Help
+    } else if (args == Vector("help") || args == Vector("--help") || args == Vector("-h")) {
+      CncfCommand.RuntimeHelp
+    } else if (args.isEmpty || args == Vector("launcher", "help") || args == Vector("launcher", "--help")) {
+      CncfCommand.LauncherHelp
     } else {
       val (runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir, rest) = _take_global_runtime_options(args)
       rest.headOption match {
@@ -108,7 +111,7 @@ object CncfCommandParser {
         case Some(other) =>
           throw CncfException(s"unknown cncf command: $other")
         case None =>
-          CncfCommand.Help
+          CncfCommand.LauncherHelp
       }
     }
   }

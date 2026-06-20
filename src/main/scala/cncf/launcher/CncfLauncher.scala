@@ -32,7 +32,13 @@ final class CncfLauncher(
       case CncfCommand.LauncherVersion =>
         println(s"${LauncherBuildInfo.name} ${LauncherBuildInfo.version}")
         0
-      case CncfCommand.Help =>
+      case CncfCommand.RuntimeHelp =>
+        val code = _run_runtime_help(config)
+        println()
+        println("Launcher help:")
+        println(CncfCommandParser.helpText)
+        code
+      case CncfCommand.LauncherHelp =>
         println(CncfCommandParser.helpText)
         0
       case runtime: CncfCommand.Runtime =>
@@ -53,6 +59,13 @@ final class CncfLauncher(
         val path = paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize
         launcherdevinvoker.invoke(path, args, paths.cwd.toAbsolutePath.normalize)
       }
+
+  private def _run_runtime_help(config: LauncherConfig): Int = {
+    val store = RuntimeVersionStore(paths)
+    val runtimeversion = store.current(None, config)
+    val classpath = runtimeresolver.resolve(runtimeversion, config, paths)
+    cncfinvoker.invoke(classpath, Vector("--help"))
+  }
 
   private def _run_runtime(
     command: CncfCommand.Runtime,
