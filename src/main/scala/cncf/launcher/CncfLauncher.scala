@@ -75,6 +75,8 @@ final class CncfLauncher(
     val store = RuntimeVersionStore(paths)
     val catalogstore = RuntimeCatalogStore(paths)
     command match {
+      case CncfCommand.Runtime.Version(runtimeversion, runtimedevdir) =>
+        _run_runtime_version(runtimeversion, runtimedevdir, store, config)
       case CncfCommand.Runtime.Current =>
         _run_runtime_current(store, catalogstore, config)
       case CncfCommand.Runtime.LocalList =>
@@ -147,16 +149,51 @@ final class CncfLauncher(
     }
   }
 
+  private def _run_runtime_version(
+    runtimeversion: Option[String],
+    runtimedevdir: Option[String],
+    store: RuntimeVersionStore,
+    config: LauncherConfig
+  ): Int = {
+    val devdir = runtimedevdir.orElse(config.runtimeDevDir)
+    val classpath = devdir match {
+      case Some(dir) =>
+        val project = paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize
+        DevSupport(paths, classpathexporter, processmanager).cncfRuntimeClasspath(project)
+      case None =>
+        val selector = store.current(runtimeversion, config)
+        runtimeresolver.resolve(selector, config, paths)
+    }
+    cncfinvoker.invoke(classpath, Vector("version"))
+  }
+
   private def _run_runtime_current(
     store: RuntimeVersionStore,
     catalogstore: RuntimeCatalogStore,
     config: LauncherConfig
   ): Int = {
-    val selector = store.current(None, config)
-    val current = runtimeresolver.resolveVersion(selector, config, paths)
-    println(current)
-    _warn_if_runtime_catalog_is_stale(selector, current, catalogstore, config)
-    0
+    config.runtimeDevDir match {
+      case Some(dir) =>
+        println(_development_runtime_version(paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize))
+        0
+      case None =>
+        val selector = store.current(None, config)
+        val current = runtimeresolver.resolveVersion(selector, config, paths)
+        println(current)
+        _warn_if_runtime_catalog_is_stale(selector, current, catalogstore, config)
+        0
+    }
+  }
+
+  private def _development_runtime_version(project: java.nio.file.Path): String = {
+    val build = project.resolve("build.sbt")
+    if (!Files.isRegularFile(build))
+      throw CncfException(s"CNCF runtime development directory has no build.sbt: ${project}")
+    val text = Files.readString(build, StandardCharsets.UTF_8)
+    val versionregex = """(?m)(?:ThisBuild\s*/\s*)?version\s*:=\s*"([^"\n]+)""".r
+    versionregex.findFirstMatchIn(text).map(_.group(1)).getOrElse(
+      throw CncfException(s"failed to read CNCF runtime development version from ${build}")
+    )
   }
 
   private def _warn_if_runtime_catalog_is_stale(

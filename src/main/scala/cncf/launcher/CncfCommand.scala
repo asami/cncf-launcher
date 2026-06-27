@@ -41,6 +41,7 @@ object CncfCommand {
 
   sealed trait Runtime extends CncfCommand
   object Runtime {
+    final case class Version(runtimeVersion: Option[String], runtimeDevDir: Option[String]) extends Runtime
     case object Current extends Runtime
     case object LocalList extends Runtime
     case object RemoteList extends Runtime
@@ -94,7 +95,7 @@ object CncfCommand {
 object CncfCommandParser {
   def parse(args: Vector[String]): CncfCommand = {
     if (args == Vector("--version") || args == Vector("version")) {
-      CncfCommand.Runtime.Current
+      CncfCommand.Runtime.Version(None, None)
     } else if (args == Vector("launcher", "version") || args == Vector("launcher", "--version")) {
       CncfCommand.LauncherVersion
     } else if (args == Vector("help") || args == Vector("--help") || args == Vector("-h")) {
@@ -103,15 +104,20 @@ object CncfCommandParser {
       CncfCommand.LauncherHelp
     } else {
       val (runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir, rest) = _take_global_runtime_options(args)
-      rest.headOption match {
-        case Some("dev") =>
-          _parse_dev(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
-        case Some("runtime") =>
-          _parse_runtime(rest.tail)
-        case Some(other) =>
-          throw CncfException(s"unknown cncf command: $other")
-        case None =>
-          CncfCommand.LauncherHelp
+      rest match {
+        case Vector("--version") | Vector("version") =>
+          CncfCommand.Runtime.Version(runtimeversion, runtimedevdir)
+        case _ =>
+          rest.headOption match {
+            case Some("dev") =>
+              _parse_dev(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
+            case Some("runtime") =>
+              _parse_runtime(rest.tail)
+            case Some(other) =>
+              throw CncfException(s"unknown cncf command: $other")
+            case None =>
+              CncfCommand.LauncherHelp
+          }
       }
     }
   }

@@ -587,15 +587,23 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   }
 
   def runtimeVersion(): Unit = _with_temp_paths { paths =>
+    Given("a project selects a CNCF runtime version in launcher config")
     _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"), "runtime:\n  version: 0.1.0\n")
-    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
-    val (code, output) = _capture_stdout {
-      launcher.run(Vector("version"))
-    }
+    val invoker = FakeInvoker()
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    When("the launcher version command is executed")
+    val code = launcher.run(Vector("version"))
+
+    Then("the launcher delegates version reporting to the selected CNCF runtime")
     _assert_equals(code, 0)
-    _assert_equals(output.trim, "0.1.0")
-    _assert_equals(CncfCommandParser.parse(Vector("version")), CncfCommand.Runtime.Current)
-    _assert_equals(CncfCommandParser.parse(Vector("--version")), CncfCommand.Runtime.Current)
+    _assert_equals(resolver.resolvedVersions, Vector("0.1.0"))
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.1.0"))
+    _assert_equals(invoker.lastClasspath, Vector(paths.cwd.resolve("fake-cncf-0.1.0.jar")))
+    _assert_equals(invoker.lastArgs, Vector("version"))
+    _assert_equals(CncfCommandParser.parse(Vector("version")), CncfCommand.Runtime.Version(None, None))
+    _assert_equals(CncfCommandParser.parse(Vector("--version")), CncfCommand.Runtime.Version(None, None))
   }
 
   def launcherVersion(): Unit = _with_temp_paths { paths =>
