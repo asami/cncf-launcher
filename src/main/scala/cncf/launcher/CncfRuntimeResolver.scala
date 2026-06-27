@@ -4,9 +4,11 @@ import java.io.File
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
+import java.util.jar.JarFile
 import scala.sys.process.*
 import scala.util.Try
 import scala.util.Using
+import org.goldenport.launcher.{LauncherDevInvoker => CoreLauncherDevInvoker}
 
 /*
  * @since   May. 17, 2026
@@ -205,22 +207,16 @@ object LauncherDevInvoker {
       if (!Files.isDirectory(devdir))
         throw CncfException(s"cncf launcher development directory not found: ${devdir}")
       val classpath = _launcher_classpath(devdir)
-      val argsfile = _write_args_file(args)
-      try {
-        val builder = new java.lang.ProcessBuilder(
-          "java",
-          "-cp",
-          classpath,
-          "cncf.launcher.CncfLauncherMain"
-        )
-        builder.directory(cwd.toFile)
-        builder.inheritIO()
-        builder.environment().put("CNCF_LAUNCHER_DEV_DELEGATED", "1")
-        builder.environment().put("CNCF_LAUNCHER_ARGS_FILE", argsfile.toString)
-        builder.start().waitFor()
-      } finally {
-        Files.deleteIfExists(argsfile)
-      }
+      CoreLauncherDevInvoker.invokeJavaMain(
+        productname = "cncf",
+        devdir = devdir,
+        classpath = classpath,
+        mainclass = "cncf.launcher.CncfLauncherMain",
+        args = args,
+        cwd = cwd,
+        environment = Map("CNCF_LAUNCHER_DEV_DELEGATED" -> "1"),
+        argsFileEnvironmentKey = "CNCF_LAUNCHER_ARGS_FILE"
+      )
     }
 
     private def _launcher_classpath(devdir: Path): String = {
@@ -230,18 +226,28 @@ object LauncherDevInvoker {
       val value = Files.readString(file, StandardCharsets.UTF_8).trim
       if (value.isEmpty)
         throw CncfException(s"cncf launcher development classpath is empty: ${file}")
+      if (!_contains_launcher_main(value))
+        throw CncfException(s"cncf launcher development classpath does not contain cncf.launcher.CncfLauncherMain: ${file}; run sbt --batch compile and cncf dev classpath in ${devdir}")
       value
     }
 
-    private def _write_args_file(args: Vector[String]): Path = {
-      val argsfile = Files.createTempFile("cncf-launcher-args-", ".bin")
-      val payload =
-        if (args.isEmpty)
-          ""
+    private def _contains_launcher_main(classpath: String): Boolean =
+      classpath.split(File.pathSeparator).toVector.map(_.trim).filter(_.nonEmpty).exists { entry =>
+        val path = Path.of(entry)
+        if (Files.isDirectory(path))
+          Files.isRegularFile(path.resolve("cncf").resolve("launcher").resolve("CncfLauncherMain.class"))
+        else if (Files.isRegularFile(path) && entry.endsWith(".jar"))
+          _jar_contains_launcher_main(path)
         else
-          args.mkString("", "\u0000", "\u0000")
-      Files.write(argsfile, payload.getBytes(StandardCharsets.UTF_8))
-      argsfile
-    }
+          false
+      }
+
+    private def _jar_contains_launcher_main(path: Path): Boolean =
+      Try {
+        Using.resource(new JarFile(path.toFile)) { jar =>
+          jar.getEntry("cncf/launcher/CncfLauncherMain.class") != null
+        }
+      }.getOrElse(false)
+
   }
 }

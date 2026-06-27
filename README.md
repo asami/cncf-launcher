@@ -75,9 +75,15 @@ The `cncf` launcher reads launcher configuration from:
 
 ```text
 ~/.cncf/launcher.yaml
+ancestor conf/cncf/launcher.yaml and .cncf/launcher.yaml files, outermost first
 $PWD/conf/cncf/launcher.yaml
 $PWD/.cncf/launcher.yaml
 ```
+
+Ancestor discovery lets a repository such as `cncf-samples` keep one root
+`.cncf/launcher.yaml` for every nested sample directory. A nested directory can
+still override the inherited settings with its own `conf/cncf/launcher.yaml` or
+`.cncf/launcher.yaml`.
 
 For `cncf dev ... --project-dev <dir>`, the project launcher config is
 `<dir>/conf/cncf/launcher.yaml`, with `<dir>/.cncf/launcher.yaml` as a local
@@ -123,6 +129,11 @@ repositories:
 supports this key, it delegates to the development launcher in that checkout
 and passes the original command line through. The delegated launcher is marked
 internally so it does not recursively delegate again.
+The launcher checkout must have a current
+`target/cncf.d/runtime-classpath.txt` containing `cncf.launcher.CncfLauncherMain`;
+run `sbt --batch compile` and `cncf dev classpath` in the launcher checkout
+after changing launcher sources. Stale classpath files are rejected before the
+delegated process is spawned.
 
 `runtime.dev-dir` is different: it selects the CNCF runtime checkout used by
 `cncf dev ...` commands after the launcher has started.

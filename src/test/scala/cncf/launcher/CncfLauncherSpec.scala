@@ -21,8 +21,10 @@ object CncfLauncherSpec {
     spec.runtimeHelp()
     spec.configMerge()
     spec.launcherDevDirDelegatesToDevelopmentLauncher()
+    spec.launcherDevDirRejectsStaleDevelopmentClasspath()
     spec.configSupportsAdditionalRdfNamespaces()
     spec.configFileOptionOverridesProjectConfig()
+    spec.workspaceRootConfigAppliesToNestedCwd()
     spec.environmentSelectsDevelopmentRuntime()
     spec.launcherConfigSupportsPropertiesAndConfFiles()
     spec.defaultRuntimeConfigFilesAreForwarded()
@@ -140,6 +142,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         launcherDevDirDelegatesToDevelopmentLauncher()
       }
 
+      "launcher dev dir rejects stale development classpath" in {
+        Given("the cncf launcher scenario: launcher dev dir rejects stale development classpath")
+        When("the launcher development classpath does not contain the launcher main class")
+        Then("the launcher reports the stale classpath before spawning the delegated process")
+        launcherDevDirRejectsStaleDevelopmentClasspath()
+      }
+
       "config supports additional rdf namespaces" in {
         Given("the cncf launcher scenario: config supports additional rdf namespaces")
         When("the launcher behavior is exercised")
@@ -152,6 +161,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the launcher behavior is exercised")
         Then("the executable specification holds through scenario-specific expectations")
         configFileOptionOverridesProjectConfig()
+      }
+
+      "workspace root config applies to nested cwd" in {
+        Given("the cncf launcher scenario: workspace root config applies to nested cwd")
+        When("the launcher loads config from a nested sample directory")
+        Then("the executable specification holds through inherited root config")
+        workspaceRootConfigAppliesToNestedCwd()
       }
 
       "environment selects development runtime" in {
@@ -692,6 +708,21 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(invoker.cwd, Some(paths.cwd.toAbsolutePath.normalize))
   }
 
+  def launcherDevDirRejectsStaleDevelopmentClasspath(): Unit = _with_temp_paths { paths =>
+    val launcherdevdir = paths.cwd.resolve("launcher-cncf")
+    val staleclassdir = paths.cwd.resolve("stale-cncf-runtime-classes")
+    Files.createDirectories(launcherdevdir)
+    Files.createDirectories(staleclassdir)
+    _write(launcherdevdir.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), staleclassdir.toString)
+
+    val e = intercept[CncfException] {
+      LauncherDevInvoker.System.invoke(launcherdevdir, Vector("launcher", "version"), paths.cwd)
+    }
+
+    e.getMessage.contains("does not contain cncf.launcher.CncfLauncherMain") shouldBe true
+    e.getMessage.contains("run sbt --batch compile and cncf dev classpath") shouldBe true
+  }
+
   def configSupportsAdditionalRdfNamespaces(): Unit = _with_temp_paths { paths =>
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
@@ -752,6 +783,32 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
     invoker.lastArgs.contains("--config") shouldBe false
     invoker.lastArgs.contains("etc/debug.yaml") shouldBe false
+  }
+
+  def workspaceRootConfigAppliesToNestedCwd(): Unit = _with_temp_paths { paths =>
+    val workspace = paths.cwd
+    val sample = workspace.resolve("samples").resolve("01-hello")
+    _write(workspace.resolve(".cncf").resolve("launcher.yaml"),
+      """runtime:
+        |  version: root
+        |  dev-dir: ../cncf-runtime
+        |""".stripMargin)
+    _write(workspace.resolve(".cncf").resolve("config.yaml"),
+      """textus:
+        |  knowledge:
+        |    rdf:
+        |      current-prefix: root
+        |""".stripMargin)
+    _write(sample.resolve(".cncf").resolve("launcher.yaml"),
+      """runtime:
+        |  version: sample
+        |""".stripMargin)
+
+    val config = LauncherConfig.load(paths.withCwd(sample))
+
+    _assert_equals(config.runtimeVersion, Some("sample"))
+    _assert_equals(config.runtimeDevDir, Some("../cncf-runtime"))
+    config.cncfConfigFiles.exists(_.contains("work/.cncf/config.yaml")) shouldBe true
   }
 
   def environmentSelectsDevelopmentRuntime(): Unit = _with_temp_paths { paths =>
@@ -1842,9 +1899,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   def noRuntimeLibraryDependencies(): Unit = {
     val lines = Files.readString(Path.of("build.sbt")).linesIterator.toVector.map(_.trim)
     def _runtime_library_dependency_(line: String): Boolean =
-      line.startsWith("libraryDependencies +=") && !line.contains("% Test") && !line.contains("% \"test\"")
+      line.contains("libraryDependencies") &&
+        line.contains("\"") &&
+        !line.contains("goldenport-launcher-core") &&
+        !line.contains("% Test") &&
+        !line.contains("% \"test\"")
     lines.exists(_runtime_library_dependency_) shouldBe false
-    lines.exists(_.startsWith("libraryDependencies ++=")) shouldBe false
+    lines.exists(_.contains("goldenport-launcher-core")) shouldBe true
   }
 
   private def _capture_stdout(f: => Int): (Int, String) = {
