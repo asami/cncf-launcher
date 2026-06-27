@@ -2,7 +2,7 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 20, 2026
+ * @version Jun. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -449,6 +449,12 @@ object CncfCommandParser {
       |  --runtime-selection=current-compatible|tested-latest|latest-compatible|newest-compatible selects the compatible runtime preference.
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF development checkout for dev commands.
+      |  CNCF_VERSION/CNCF_RUNTIME_VERSION override the configured runtime version.
+      |  CNCF_RUNTIME_DEV_DIR directly selects a local CNCF runtime checkout.
+      |  CNCF_LAUNCHER_DEV_DIR directly selects a local cncf-launcher checkout.
+      |  CNCF_USE_DEVELOPMENT=true activates development.launcher.dev-dir and development.runtime.dev-dir.
+      |  CNCF_PROJECT_DIR is a compatibility alias for a development runtime checkout.
+      |  Config launcher.dev-dir/runtime.dev-dir are always active; development.* dev-dir values are development candidates.
       |  --config <file> loads an additional launcher config file; CLI config wins over global/project config.
       |  --cncf-config <file> loads an additional CNCF runtime config file.
       |  Launcher config files may use yaml/yml, properties, props, or lightweight conf.

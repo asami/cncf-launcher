@@ -5,13 +5,15 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   May. 17, 2026
- * @version Jun.  8, 2026
+ * @version Jun. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherConfig(
   launcherDevDir: Option[String] = None,
   runtimeVersion: Option[String] = None,
   runtimeDevDir: Option[String] = None,
+  developmentLauncherDevDir: Option[String] = None,
+  developmentRuntimeDevDir: Option[String] = None,
   runtimeCatalogUrl: Option[String] = None,
   runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
   runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
@@ -36,6 +38,8 @@ final case class LauncherConfig(
       launcherDevDir = higher.launcherDevDir.orElse(launcherDevDir),
       runtimeVersion = higher.runtimeVersion.orElse(runtimeVersion),
       runtimeDevDir = higher.runtimeDevDir.orElse(runtimeDevDir),
+      developmentLauncherDevDir = higher.developmentLauncherDevDir.orElse(developmentLauncherDevDir),
+      developmentRuntimeDevDir = higher.developmentRuntimeDevDir.orElse(developmentRuntimeDevDir),
       runtimeCatalogUrl = higher.runtimeCatalogUrl.orElse(runtimeCatalogUrl),
       runtimeSelectionPolicy = higher.runtimeSelectionPolicy.orElse(runtimeSelectionPolicy),
       runtimeNoCompatiblePolicy = higher.runtimeNoCompatiblePolicy.orElse(runtimeNoCompatiblePolicy),
@@ -54,6 +58,12 @@ final case class LauncherConfig(
       sarRepositories = _merge_list(sarRepositories, higher.sarRepositories),
       mavenRepositories = _merge_list(mavenRepositories, higher.mavenRepositories),
       coursierRepositories = _merge_list(coursierRepositories, higher.coursierRepositories)
+    )
+
+  def withDevelopmentEnabled: LauncherConfig =
+    copy(
+      launcherDevDir = launcherDevDir.orElse(developmentLauncherDevDir),
+      runtimeDevDir = runtimeDevDir.orElse(developmentRuntimeDevDir)
     )
 
   def normalizedWithDefaults: LauncherConfig =
@@ -135,6 +145,13 @@ object LauncherConfig {
   def load(
     paths: LauncherPaths,
     configfiles: Vector[String]
+  ): LauncherConfig =
+    load(paths, configfiles, sys.env)
+
+  def load(
+    paths: LauncherPaths,
+    configfiles: Vector[String],
+    environment: Map[String, String]
   ): LauncherConfig = {
     val global = loadFile(paths.globalConfig)
     val project = loadFile(paths.projectConfig)
@@ -146,8 +163,13 @@ object LauncherConfig {
     val explicit = configfiles.foldLeft(base) { (acc, file) =>
       acc.mergeHigher(loadRequiredFile(paths.cwd.resolve(file).normalize.toAbsolutePath.normalize))
     }
-    explicit.copy(cncfConfigFiles = _default_runtime_config_files(paths) ++ explicit.cncfConfigFiles).
-      normalizedWithDefaults(paths)
+    val withruntimeconfigs = explicit.copy(cncfConfigFiles = _default_runtime_config_files(paths) ++ explicit.cncfConfigFiles)
+    val development =
+      if (_use_development(environment))
+        withruntimeconfigs.withDevelopmentEnabled
+      else
+        withruntimeconfigs
+    development.mergeHigher(fromEnvironment(environment)).normalizedWithDefaults(paths)
   }
 
   private def _default_runtime_config_files(paths: LauncherPaths): Vector[String] =
@@ -190,6 +212,8 @@ object LauncherConfig {
       launcherDevDir = _first_("cncf.launcher.dev.dir", "cncf.launcher.dev-dir", "cncf.launcher.devDir", "launcher.dev.dir", "launcher.dev-dir", "launcher.devDir"),
       runtimeVersion = _first_("runtime.version", "cncf.runtime.version", "version"),
       runtimeDevDir = _first_("runtime.dev-dir", "runtime.dev_dir", "cncf.runtime.dev-dir", "cncf.runtime.dev_dir", "runtime.devDir", "runtime.dev.dir", "cncf.runtime.devDir", "cncf.runtime.dev.dir"),
+      developmentLauncherDevDir = _first_("development.launcher.dev-dir", "development.launcher.dev_dir", "development.launcher.devDir", "development.launcher.dev.dir", "cncf.development.launcher.dev-dir", "cncf.development.launcher.dev_dir", "cncf.development.launcher.devDir", "cncf.development.launcher.dev.dir"),
+      developmentRuntimeDevDir = _first_("development.runtime.dev-dir", "development.runtime.dev_dir", "development.runtime.devDir", "development.runtime.dev.dir", "cncf.development.runtime.dev-dir", "cncf.development.runtime.dev_dir", "cncf.development.runtime.devDir", "cncf.development.runtime.dev.dir"),
       runtimeCatalogUrl = _first_("runtime.catalog.url", "cncf.runtime.catalog.url", "catalog.url"),
       runtimeSelectionPolicy = _first_("runtime.cncf.selection-policy", "runtime.cncf.selection_policy", "cncf.runtime.cncf.selection-policy", "cncf.runtime.cncf.selection_policy", "runtime.cncf.selectionPolicy", "cncf.runtime.cncf.selectionPolicy").
         map(RuntimeSelectionPolicy.parse),
@@ -261,6 +285,33 @@ object LauncherConfig {
   private def _normalize_namespace_prefix(value: String): String =
     value.trim.toLowerCase.replace('_', '-').replaceAll("[^a-z0-9-]+", "-").replaceAll("(^-+|-+$)", "")
 
+  def fromEnvironment(environment: Map[String, String] = sys.env): LauncherConfig = {
+    val usedevelopment = _use_development(environment)
+    val runtimedevdir = _env_first(environment, "CNCF_RUNTIME_DEV_DIR").orElse {
+      if (usedevelopment)
+        _env_first(environment, "CNCF_PROJECT_DIR")
+      else
+        None
+    }
+    LauncherConfig(
+      launcherDevDir = _env_first(environment, "CNCF_LAUNCHER_DEV_DIR"),
+      runtimeVersion = _env_first(environment, "CNCF_RUNTIME_VERSION", "CNCF_VERSION"),
+      runtimeDevDir = runtimedevdir
+    )
+  }
+
+  private def _use_development(environment: Map[String, String]): Boolean =
+    _env_first(environment, "CNCF_USE_DEVELOPMENT").exists(_truthy)
+
+  private def _env_first(environment: Map[String, String], keys: String*): Option[String] =
+    keys.toVector.flatMap(k => environment.get(k)).headOption.map(_.trim).filter(_.nonEmpty)
+
+  private def _truthy(value: String): Boolean =
+    value.trim.toLowerCase match {
+      case "true" | "yes" | "on" | "1" => true
+      case _ => false
+    }
+
   def localCarRepositories(paths: LauncherPaths): Vector[String] =
     Vector(paths.localCarRepository.toString)
 
@@ -282,6 +333,8 @@ object LauncherConfig {
     val launcherdevdir = c.launcherDevDir.getOrElse("(not configured)")
     val runtime = c.runtimeVersion.getOrElse("(not configured)")
     val runtimedevdir = c.runtimeDevDir.getOrElse("(not configured)")
+    val developmentlauncherdevdir = c.developmentLauncherDevDir.getOrElse("(not configured)")
+    val developmentruntimedevdir = c.developmentRuntimeDevDir.getOrElse("(not configured)")
     val catalog = c.runtimeCatalogUrl.getOrElse("(not configured)")
     val selection = c.runtimeSelectionPolicy.map(RuntimeSelectionPolicy.render).getOrElse("current-compatible")
     val nocompatible = c.runtimeNoCompatiblePolicy.map(RuntimeNoCompatiblePolicy.render).getOrElse("error")
@@ -314,6 +367,8 @@ object LauncherConfig {
     s"""launcher.dev-dir: $launcherdevdir
        |runtime.version: $runtime
        |runtime.dev-dir: $runtimedevdir
+       |development.launcher.dev-dir: $developmentlauncherdevdir
+       |development.runtime.dev-dir: $developmentruntimedevdir
        |runtime.catalog.url: $catalog
        |runtime.cncf.selection-policy: $selection
        |runtime.cncf.no-compatible-policy: $nocompatible

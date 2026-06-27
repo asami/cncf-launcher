@@ -9,7 +9,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 20, 2026
+ * @version Jun. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -23,6 +23,7 @@ object CncfLauncherSpec {
     spec.launcherDevDirDelegatesToDevelopmentLauncher()
     spec.configSupportsAdditionalRdfNamespaces()
     spec.configFileOptionOverridesProjectConfig()
+    spec.environmentSelectsDevelopmentRuntime()
     spec.launcherConfigSupportsPropertiesAndConfFiles()
     spec.defaultRuntimeConfigFilesAreForwarded()
     spec.configFileProjectDevSurvivesTargetCwdSwitch()
@@ -151,6 +152,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the launcher behavior is exercised")
         Then("the executable specification holds through scenario-specific expectations")
         configFileOptionOverridesProjectConfig()
+      }
+
+      "environment selects development runtime" in {
+        environmentSelectsDevelopmentRuntime()
       }
 
       "launcher config supports properties and conf files" in {
@@ -747,6 +752,45 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(resolver.resolvedClasspaths, Vector("0.2.0"))
     invoker.lastArgs.contains("--config") shouldBe false
     invoker.lastArgs.contains("etc/debug.yaml") shouldBe false
+  }
+
+  def environmentSelectsDevelopmentRuntime(): Unit = _with_temp_paths { paths =>
+    Given("a project config contains development runtime and launcher candidates")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  launcher:
+        |    dev-dir: ../candidate-launcher
+        |  runtime:
+        |    dev-dir: ../candidate-runtime
+        |""".stripMargin)
+
+    When("the launcher loads config without the development flag")
+    val inert = LauncherConfig.load(paths, Vector.empty, Map.empty)
+
+    Then("the development candidates are recorded but not activated")
+    _assert_equals(inert.launcherDevDir, None)
+    _assert_equals(inert.runtimeDevDir, None)
+    _assert_equals(inert.developmentLauncherDevDir, Some("../candidate-launcher"))
+    _assert_equals(inert.developmentRuntimeDevDir, Some("../candidate-runtime"))
+
+    When("the launcher loads config with development enabled")
+    val active = LauncherConfig.load(paths, Vector.empty, Map("CNCF_USE_DEVELOPMENT" -> "true"))
+
+    Then("the development launcher and runtime candidates become active")
+    _assert_equals(active.launcherDevDir, Some("../candidate-launcher"))
+    _assert_equals(active.runtimeDevDir, Some("../candidate-runtime"))
+
+    When("explicit environment overrides are supplied")
+    val env = LauncherConfig.load(paths, Vector.empty, Map(
+      "CNCF_VERSION" -> "0.4.12-SNAPSHOT",
+      "CNCF_RUNTIME_DEV_DIR" -> "../env-runtime",
+      "CNCF_LAUNCHER_DEV_DIR" -> "../env-launcher"
+    ))
+
+    Then("explicit runtime and launcher development directories take precedence")
+    _assert_equals(env.runtimeVersion, Some("0.4.12-SNAPSHOT"))
+    _assert_equals(env.runtimeDevDir, Some("../env-runtime"))
+    _assert_equals(env.launcherDevDir, Some("../env-launcher"))
   }
 
   def launcherConfigSupportsPropertiesAndConfFiles(): Unit = _with_temp_paths { paths =>

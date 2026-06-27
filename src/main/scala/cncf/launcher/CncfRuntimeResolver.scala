@@ -5,12 +5,13 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import scala.sys.process.*
+import scala.util.Try
 import scala.util.Using
 
 /*
  * @since   May. 17, 2026
  *  version May. 18, 2026
- * @version Jun. 15, 2026
+ * @version Jun. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 trait CncfRuntimeResolver {
@@ -86,7 +87,14 @@ final class CoursierCncfRuntimeResolver(
     paths: LauncherPaths,
     catalog: Option[RuntimeCatalog]
   ): Option[RuntimeCatalogVersion] =
-    catalog.map(_.resolve(version))
+    catalog.flatMap { c =>
+      Try(c.resolve(version)).toOption.orElse {
+        if (_is_dynamic_runtime_selector(version))
+          Some(c.resolve(version))
+        else
+          None
+      }
+    }
 
   private def _fallback_version(version: String, config: LauncherConfig): String =
     version match {
@@ -100,6 +108,12 @@ final class CoursierCncfRuntimeResolver(
         throw CncfException("failed to resolve recommended CNCF runtime version from runtime catalog")
       case x =>
         x
+    }
+
+  private def _is_dynamic_runtime_selector(selector: String): Boolean =
+    selector match {
+      case "recommended" | "latest" | "latest-stable" | "latest.release" | "latest-snapshot" | "newest" => true
+      case _ => false
     }
 
   private def _newest(config: LauncherConfig): String =
