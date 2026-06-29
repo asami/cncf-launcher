@@ -1080,7 +1080,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     script.contains(s"launcher_dev_dir='${paths.cwd.resolve("launcher-dev").toAbsolutePath.normalize}'") shouldBe true
     script.contains("export CNCF_LAUNCHER_DEV_DIR=\"$launcher_dev_dir\"") shouldBe true
     script.contains("component_dev_dirs=(") shouldBe true
-    script.contains("'../textus-georesolver'") shouldBe true
+    script.contains(s"'${paths.cwd.resolve("../textus-georesolver").toAbsolutePath.normalize}'") shouldBe true
     script.contains("component_dev_args+=(\"--component-dev-dir\" \"$dir\")") shouldBe true
     script.contains("exec cncf \"${cncf_args[@]}\" \"$fixed_target\" command \"${component_dev_args[@]}\" \"${command_args[@]}\"") shouldBe true
     Files.isExecutable(command) shouldBe true

@@ -382,7 +382,8 @@ final class CncfLauncher(
       runtimeSelectionPolicy = None,
       runtimeNoCompatiblePolicy = None,
       runtimeDevDir = runtimedevdir,
-      launcherDevDir = effectiveconfig.launcherDevDir
+      launcherDevDir = effectiveconfig.launcherDevDir.map(p => effectivepaths.cwd.resolve(p).normalize.toAbsolutePath.normalize.toString),
+      componentDevDirs = rawcontext.componentDevDirs.map(_.toString)
     )
   }
 
