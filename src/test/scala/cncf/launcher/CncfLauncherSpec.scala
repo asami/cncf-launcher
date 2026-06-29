@@ -9,7 +9,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 27, 2026
+ * @version Jun. 29, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -34,6 +34,8 @@ object CncfLauncherSpec {
     spec.runtimeVersionPrecedence()
     spec.runtimeUseWritesExpectedFiles()
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
+    spec.installCliWritesDevelopmentCommand()
+    spec.executeTargetFirstDelegatesToRuntime()
     spec.runtimeCatalogParseAndSelectorResolution()
     spec.runtimeCatalogCommands()
     spec.runtimeCurrentWarnsWhenCachedRecommendedIsStale()
@@ -259,6 +261,20 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the launcher behavior is exercised")
         Then("the executable specification holds through scenario-specific expectations")
         runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
+      }
+
+      "install cli writes development command" in {
+        Given("the cncf launcher scenario: install cli writes development command")
+        When("the launcher installs a development command")
+        Then("the command delegates to cncf target-first command with file parameter expansion")
+        installCliWritesDevelopmentCommand()
+      }
+
+      "target-first execution delegates to runtime" in {
+        Given("the cncf launcher scenario: target-first execution delegates to runtime")
+        When("the launcher receives canonical target-first syntax")
+        Then("the runtime receives expanded runtime activation arguments")
+        executeTargetFirstDelegatesToRuntime()
       }
 
       "runtime catalog commands" in {
@@ -584,6 +600,49 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       .asInstanceOf[CncfCommand.Runtime.Use]
     _assert_equals(autouse.version, "latest")
     _assert_equals(autouse.target, CncfCommand.RuntimeUseTarget.Auto)
+
+    val install = CncfCommandParser.parse(Vector(
+      "install-cli",
+      "sanpomap",
+      "--project-dev",
+      ".",
+      "--component-dev-dir",
+      "../textus-georesolver",
+      "--overwrite"
+    )).asInstanceOf[CncfCommand.InstallCli]
+    _assert_equals(install.name, "sanpomap")
+    _assert_equals(install.installedName, "sanpomap-dev")
+    _assert_equals(install.projectDev, Some("."))
+    _assert_equals(install.operationPrefix, None)
+    _assert_equals(install.fileParams, Vector.empty)
+    _assert_equals(install.componentDevDirs, Vector("../textus-georesolver"))
+    _assert_equals(install.binDir, None)
+    _assert_equals(install.runtimeVersion, None)
+    _assert_equals(install.runtimeDevDir, None)
+    _assert_equals(install.launcherDevDir, None)
+    install.overwrite shouldBe true
+
+    val installruntime = CncfCommandParser.parse(Vector(
+      "--runtime", "0.4.13-SNAPSHOT",
+      "--runtime-dev-dir", "/tmp/cncf-runtime",
+      "install-cli",
+      "sanpomap"
+    )).asInstanceOf[CncfCommand.InstallCli]
+    _assert_equals(installruntime.runtimeVersion, Some("0.4.13-SNAPSHOT"))
+    _assert_equals(installruntime.runtimeDevDir, Some("/tmp/cncf-runtime"))
+
+    val currenttarget = CncfCommandParser.parse(Vector(
+      "command",
+      "validate-presentation"
+    )).asInstanceOf[CncfCommand.Execute]
+    _assert_equals(currenttarget.args, Vector("command", "validate-presentation"))
+
+    val namedtarget = CncfCommandParser.parse(Vector(
+      "textus-sanpomap:1",
+      "command",
+      "validate-presentation"
+    )).asInstanceOf[CncfCommand.Execute]
+    _assert_equals(namedtarget.args, Vector("command", "--textus.component=textus-sanpomap", "--textus.component.version=1", "validate-presentation"))
   }
 
   def runtimeVersion(): Unit = _with_temp_paths { paths =>
@@ -989,6 +1048,55 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     launcher.run(Vector("runtime", "use", "latest"))
     _assert_equals(Files.readString(paths.projectVersion).trim, "latest")
     Files.isRegularFile(paths.globalVersion) shouldBe false
+  }
+
+  def installCliWritesDevelopmentCommand(): Unit = _with_temp_paths { paths =>
+    _write(
+      paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      s"launcher:\n  dev-dir: ${paths.cwd.resolve("launcher-dev").toAbsolutePath.normalize}\nruntime:\n  version: 0.4.12\n"
+    )
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      FakeInvoker(),
+      environment = Map("CNCF_LAUNCHER_DEV_DELEGATED" -> "1")
+    )
+    val code = launcher.run(Vector(
+      "install-cli",
+      "sanpomap",
+      "--project-dev",
+      ".",
+      "--component-dev-dir",
+      "../textus-georesolver"
+    ))
+
+    _assert_equals(code, 0)
+    val command = paths.home.resolve("bin").resolve("sanpomap-dev")
+    val script = Files.readString(command)
+    script.contains(s"fixed_target='${paths.cwd.toAbsolutePath.normalize}'") shouldBe true
+    script.contains("operation_prefix=''") shouldBe true
+    script.contains("runtime_version='0.4.12'") shouldBe true
+    script.contains("runtime_dev_dir=''") shouldBe true
+    script.contains(s"launcher_dev_dir='${paths.cwd.resolve("launcher-dev").toAbsolutePath.normalize}'") shouldBe true
+    script.contains("export CNCF_LAUNCHER_DEV_DIR=\"$launcher_dev_dir\"") shouldBe true
+    script.contains("component_dev_dirs=(") shouldBe true
+    script.contains("'../textus-georesolver'") shouldBe true
+    script.contains("component_dev_args+=(\"--component-dev-dir\" \"$dir\")") shouldBe true
+    script.contains("exec cncf \"${cncf_args[@]}\" \"$fixed_target\" command \"${component_dev_args[@]}\" \"${command_args[@]}\"") shouldBe true
+    Files.isExecutable(command) shouldBe true
+  }
+
+  def executeTargetFirstDelegatesToRuntime(): Unit = _with_temp_paths { paths =>
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"), "runtime:\n  version: 0.4.12\n")
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    val code = launcher.run(Vector("textus-sanpomap:1", "command", "validate-presentation", "--format", "yaml"))
+
+    _assert_equals(code, 0)
+    _assert_equals(resolver.resolvedClasspaths, Vector("0.4.12"))
+    _assert_equals(invoker.lastArgs, Vector("command", "--textus.component=textus-sanpomap", "--textus.component.version=1", "validate-presentation", "--format", "yaml"))
   }
 
   def runtimeCatalogParseAndSelectorResolution(): Unit = {

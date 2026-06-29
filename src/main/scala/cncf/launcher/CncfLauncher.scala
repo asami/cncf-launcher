@@ -8,7 +8,7 @@ import scala.util.Try
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jun. 27, 2026
+ * @version Jun. 29, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -44,6 +44,10 @@ final class CncfLauncher(
         0
       case runtime: CncfCommand.Runtime =>
         _run_runtime(runtime, config)
+      case install: CncfCommand.InstallCli =>
+        _run_install_cli(install, configfiles, cncfconfigfiles)
+      case execute: CncfCommand.Execute =>
+        _run_execute(execute, config)
       case dev: CncfCommand.Dev =>
         _run_dev(dev, configfiles, cncfconfigfiles)
     }
@@ -298,6 +302,89 @@ final class CncfLauncher(
           CncfCommand.RuntimeUseTarget.Global
       case x => x
     }
+
+  private def _run_execute(
+    command: CncfCommand.Execute,
+    config: LauncherConfig
+  ): Int = {
+    val store = RuntimeVersionStore(paths)
+    val classpath = command.runtimeDevDir.orElse(config.runtimeDevDir) match {
+      case Some(dir) =>
+        DevSupport(paths, classpathexporter, processmanager)
+          .cncfRuntimeClasspath(paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
+      case None =>
+        val runtimeversion = store.current(command.runtimeVersion, config)
+        runtimeresolver.resolve(runtimeversion, config, paths)
+    }
+    cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ command.args)
+  }
+
+  private def _run_install_cli(
+    command: CncfCommand.InstallCli,
+    configfiles: Vector[String],
+    cncfconfigfiles: Vector[String]
+  ): Int = {
+    val pinned = _pin_install_cli_runtime(command, configfiles, cncfconfigfiles)
+    val path = CliInstaller.installCncf(paths, pinned)
+    println(s"installed CLI command ${pinned.installedName}: ${path}")
+    0
+  }
+
+  private def _pin_install_cli_runtime(
+    command: CncfCommand.InstallCli,
+    configfiles: Vector[String],
+    cncfconfigfiles: Vector[String]
+  ): CncfCommand.InstallCli = {
+    val options = CncfCommand.DevOptions(
+      target = CncfCommand.DevTarget.ProjectDev(command.projectDev),
+      runtimeVersion = command.runtimeVersion,
+      runtimeSelectionPolicy = command.runtimeSelectionPolicy,
+      runtimeNoCompatiblePolicy = command.runtimeNoCompatiblePolicy,
+      runtimeDevDir = command.runtimeDevDir,
+      componentDevDirs = command.componentDevDirs
+    )
+    val explicitconfig = LauncherConfig(cncfConfigFiles = cncfconfigfiles)
+    val initialconfig = LauncherConfig.load(paths, configfiles, environment).mergeHigher(explicitconfig)
+    val initialoptions = options.copy(target = _config_dev_target(options.target, initialconfig))
+    val effectivepaths = _dev_paths(initialoptions)
+    val config =
+      if (effectivepaths.cwd == paths.cwd)
+        initialconfig
+      else
+        LauncherConfig.load(effectivepaths, configfiles, environment).mergeHigher(explicitconfig)
+    val store = RuntimeVersionStore(effectivepaths)
+    val basecatalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
+    val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
+    val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
+    val effectiveoptions = options.copy(
+      target = _normalize_dev_target(_config_dev_target(options.target, baseconfig))
+    )
+    val rawcontext = devsupport.context(effectiveoptions, baseconfig, store)
+    val catalog =
+      rawcontext.runtimeDevDir.flatMap(RuntimeCatalogStore.loadRuntimeDevelopmentCatalog)
+        .orElse(basecatalog)
+    val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
+    val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
+      orElse(effectiveconfig.runtimeSelectionPolicy).
+      getOrElse(RuntimeSelectionPolicy.CurrentCompatible)
+    val policy = effectiveoptions.runtimeNoCompatiblePolicy.orElse(effectiveconfig.runtimeNoCompatiblePolicy).getOrElse(RuntimeNoCompatiblePolicy.Error)
+    val runtimeversion = RuntimeVersionSelection.select(
+      requested = effectiveoptions.runtimeVersion,
+      stored = store.current(None, effectiveconfig),
+      requirements = rawcontext.runtimeRequirements,
+      catalog = catalog,
+      selectionPolicy = selectionpolicy,
+      policy = policy
+    )
+    val runtimedevdir = rawcontext.runtimeDevDir.map(_.toString)
+    command.copy(
+      runtimeVersion = if (runtimedevdir.isDefined) None else Some(runtimeversion),
+      runtimeSelectionPolicy = None,
+      runtimeNoCompatiblePolicy = None,
+      runtimeDevDir = runtimedevdir,
+      launcherDevDir = effectiveconfig.launcherDevDir
+    )
+  }
 
   private def _run_dev(
     command: CncfCommand.Dev,

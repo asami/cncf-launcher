@@ -2,12 +2,36 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 27, 2026
+ * @version Jun. 29, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
 
 object CncfCommand {
+  final case class InstallCli(
+    name: String,
+    projectDev: Option[String],
+    operationPrefix: Option[String],
+    binDir: Option[String],
+    fileParams: Vector[String],
+    componentDevDirs: Vector[String],
+    overwrite: Boolean,
+    runtimeVersion: Option[String] = None,
+    runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
+    runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
+    runtimeDevDir: Option[String] = None,
+    launcherDevDir: Option[String] = None
+  ) extends CncfCommand {
+    def installedName: String =
+      if (name.endsWith("-dev")) name else s"${name}-dev"
+  }
+
+  final case class Execute(
+    args: Vector[String],
+    runtimeVersion: Option[String],
+    runtimeDevDir: Option[String]
+  ) extends CncfCommand
+
   sealed trait Dev extends CncfCommand {
     def options: DevOptions
   }
@@ -109,10 +133,14 @@ object CncfCommandParser {
           CncfCommand.Runtime.Version(runtimeversion, runtimedevdir)
         case _ =>
           rest.headOption match {
+            case Some("install-cli") =>
+              _parse_install_cli(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
             case Some("dev") =>
               _parse_dev(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
             case Some("runtime") =>
               _parse_runtime(rest.tail)
+            case Some(_) if _is_runtime_execute(rest) =>
+              CncfCommand.Execute(_runtime_execute_args(rest), runtimeversion, runtimedevdir)
             case Some(other) =>
               throw CncfException(s"unknown cncf command: $other")
             case None =>
@@ -120,6 +148,84 @@ object CncfCommandParser {
           }
       }
     }
+  }
+
+  private def _parse_install_cli(
+    args: Vector[String],
+    runtimeversion: Option[String],
+    selectionpolicy: Option[RuntimeSelectionPolicy],
+    nocompatiblepolicy: Option[RuntimeNoCompatiblePolicy],
+    runtimedevdir: Option[String]
+  ): CncfCommand.InstallCli = {
+    var name: Option[String] = None
+    var projectdev: Option[String] = None
+    var operationprefix: Option[String] = None
+    var bindir: Option[String] = None
+    var fileparams = Vector.empty[String]
+    var componentdevdirs = Vector.empty[String]
+    var overwrite = false
+    var i = 0
+    while (i < args.length) {
+      args(i) match {
+        case "--project-dev" =>
+          if (i + 1 >= args.length) throw CncfException("--project-dev requires a value")
+          projectdev = Some(args(i + 1))
+          i += 2
+        case x if x.startsWith("--project-dev=") =>
+          projectdev = Some(x.stripPrefix("--project-dev="))
+          i += 1
+        case "--operation-prefix" =>
+          if (i + 1 >= args.length) throw CncfException("--operation-prefix requires a value")
+          operationprefix = Some(args(i + 1))
+          i += 2
+        case x if x.startsWith("--operation-prefix=") =>
+          operationprefix = Some(x.stripPrefix("--operation-prefix="))
+          i += 1
+        case "--bin-dir" =>
+          if (i + 1 >= args.length) throw CncfException("--bin-dir requires a value")
+          bindir = Some(args(i + 1))
+          i += 2
+        case x if x.startsWith("--bin-dir=") =>
+          bindir = Some(x.stripPrefix("--bin-dir="))
+          i += 1
+        case "--file-param" =>
+          if (i + 1 >= args.length) throw CncfException("--file-param requires a value")
+          fileparams :+= args(i + 1)
+          i += 2
+        case x if x.startsWith("--file-param=") =>
+          fileparams :+= x.stripPrefix("--file-param=")
+          i += 1
+        case "--component-dev-dir" =>
+          if (i + 1 >= args.length) throw CncfException("--component-dev-dir requires a value")
+          componentdevdirs :+= args(i + 1)
+          i += 2
+        case x if x.startsWith("--component-dev-dir=") =>
+          componentdevdirs :+= x.stripPrefix("--component-dev-dir=")
+          i += 1
+        case "--overwrite" =>
+          overwrite = true
+          i += 1
+        case x if x.startsWith("--") =>
+          throw CncfException(s"unknown cncf install-cli option: $x")
+        case x =>
+          if (name.isEmpty) name = Some(x)
+          else throw CncfException(s"unexpected cncf install-cli argument: $x")
+          i += 1
+      }
+    }
+    CncfCommand.InstallCli(
+      name.getOrElse(throw CncfException("cncf install-cli requires a command name")),
+      projectdev,
+      operationprefix,
+      bindir,
+      fileparams,
+      componentdevdirs,
+      overwrite,
+      runtimeVersion = runtimeversion,
+      runtimeSelectionPolicy = selectionpolicy,
+      runtimeNoCompatiblePolicy = nocompatiblepolicy,
+      runtimeDevDir = runtimedevdir
+    )
   }
 
   private def _take_global_runtime_options(args: Vector[String]): (Option[String], Option[RuntimeSelectionPolicy], Option[RuntimeNoCompatiblePolicy], Option[String], Vector[String]) = {
@@ -173,6 +279,53 @@ object CncfCommandParser {
     }
     (runtime, selectionpolicy, nocompatiblepolicy, runtimedevdir, out.result())
   }
+
+  private def _is_runtime_execute(args: Vector[String]): Boolean =
+    args match {
+      case Vector(mode, _*) if _is_target_mode(mode) => true
+      case Vector(target, mode, _*) if !target.startsWith("-") && !_is_reserved_target(target) && _is_target_mode(mode) => true
+      case xs if xs.exists(_is_target_mode) && xs.headOption.exists(_.startsWith("--")) => true
+      case _ => false
+    }
+
+  private def _runtime_execute_args(args: Vector[String]): Vector[String] =
+    args match {
+      case Vector(mode, _*) if _is_target_mode(mode) =>
+        args
+      case Vector(target, mode, rest @ _*) if !target.startsWith("-") && !_is_reserved_target(target) && _is_target_mode(mode) =>
+        mode +: (_target_runtime_args(target) ++ rest.toVector)
+      case _ =>
+        args
+    }
+
+  private def _target_runtime_args(target: String): Vector[String] = {
+    val trimmed = target.trim
+    if (trimmed.isEmpty)
+      throw CncfException("cncf target is empty")
+    else if (trimmed == ".")
+      Vector.empty
+    else if (trimmed.endsWith(".car"))
+      Vector(s"--component-file=${trimmed}")
+    else if (trimmed.endsWith(".sar"))
+      Vector(s"--subsystem-file=${trimmed}")
+    else if (_is_path_like_target(trimmed))
+      Vector(s"--component-dev-dir=${trimmed}")
+    else {
+      val parts = trimmed.split(":", 2)
+      val name = parts(0)
+      val version = if (parts.length == 2) Option(parts(1)).map(_.trim).filter(_.nonEmpty) else None
+      Vector(Some(s"--textus.component=${name}"), version.map(v => s"--textus.component.version=${v}")).flatten
+    }
+  }
+
+  private def _is_path_like_target(value: String): Boolean =
+    value.contains("/") || value == ".." || value.startsWith("~")
+
+  private def _is_target_mode(value: String): Boolean =
+    value == "command" || value == "server" || value == "client"
+
+  private def _is_reserved_target(value: String): Boolean =
+    Set("runtime", "install-cli", "version", "help", "launcher", "dev").contains(value)
 
   private def _parse_dev(
     args: Vector[String],
@@ -425,6 +578,13 @@ object CncfCommandParser {
       |  cncf --version
       |  cncf version
       |  cncf launcher version
+      |  cncf install-cli <command-base-name> [--project-dev <dir>] [--component-dev-dir <dir>...] [--operation-prefix <component.service>] [--file-param <name>...] [--bin-dir <dir>] [--overwrite]
+      |  cncf <target> command <operation> [args...]
+      |  cncf <target> server [args...]
+      |  cncf <target> client [args...]
+      |  cncf command <operation> [args...]
+      |  cncf server [args...]
+      |  cncf client [args...]
       |  cncf --config etc/launcher/debug.yaml --cncf-config etc/debug.yaml dev server
       |  cncf dev classpath [--project-dev <dir>]
       |  cncf dev check [--project-dev <dir>] [--runtime-dev-dir <dir>]

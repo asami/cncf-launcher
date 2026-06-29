@@ -26,6 +26,37 @@ cncf dev server --car-file target/textus-knowledge-editor-0.1.0-SNAPSHOT.car
 cncf dev server-emulation my-component.my-service.my-operation
 ```
 
+## Development CLI Installation
+
+`cncf install-cli` installs a development command that delegates to
+`cncf <fixed-target> command` against a local project checkout. This is intended for
+component developers. General users should use `textus install-cli`, which
+delegates to packaged CAR/SAR artifacts.
+
+```bash
+cncf install-cli sanpomap \
+  --project-dev /Users/asami/src/dev2026/textus-sanpomap \
+  --overwrite
+
+sanpomap-dev validate-presentation --presentationDsl xxx.yaml --format yaml
+```
+
+The installed command name is suffixed with `-dev` unless the requested base
+name already ends in `-dev`. The generated command delegates to
+`cncf <fixed-target> command <operation-selector>` and passes user arguments through as
+the operation selector and operation parameters. The target is resolved to an absolute
+project path at install time. `~/bin` is the default install
+directory; use `--bin-dir <dir>` to choose another location.
+
+Leaf-only operation selectors such as `validate-presentation` depend on CNCF
+runtime selector resolution. If the pinned runtime requires a full selector,
+use `sanpomap-dev sanpomap.presentation.validate-presentation ...` or install a
+prefixed development command.
+
+If a project still needs a selector prefix in the generated command, pass
+`--operation-prefix <component.service>`. Otherwise the selector is passed
+unchanged and resolution is left to the CNCF runtime.
+
 `cncf dev classpath` writes:
 
 ```text
