@@ -91,8 +91,9 @@ without source overrides are resolved by the CNCF runtime from configured
 component repositories. `textus server <artifact>` is the CAR/SAR artifact
 launcher for repository-based application startup.
 
-Use `--runtime-dev-dir <dir>` or `runtime.devDir` to run against a local CNCF
-runtime checkout instead of a published runtime artifact. This is for CNCF core
+Use `--runtime-dev-dir <dir>` or `runtime.dev-dir` to run against a local CNCF
+runtime checkout instead of a published runtime artifact. This applies to
+target-first execute commands and `cncf dev ...` commands. It is for CNCF core
 development; component source directories still use `--component-dev-dir`.
 
 Runtime arguments placed before the operation selector are forwarded before
@@ -167,7 +168,8 @@ after changing launcher sources. Stale classpath files are rejected before the
 delegated process is spawned.
 
 `runtime.dev-dir` is different: it selects the CNCF runtime checkout used by
-`cncf dev ...` commands after the launcher has started.
+target-first execute commands and `cncf dev ...` commands after the launcher
+has started.
 
 ## CNCF Runtime Configuration
 
@@ -218,7 +220,7 @@ not read as launcher configuration.
 
 Runtime version selection is the same model as `textus`:
 
-1. `--runtime-dev-dir <dir>` / `runtime.devDir` for dev commands only
+1. `--runtime-dev-dir <dir>` / `runtime.dev-dir`
 2. `--runtime <version>`
 3. `$PWD/.cncf/version`
 4. `~/.cncf/version`

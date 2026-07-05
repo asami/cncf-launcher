@@ -686,6 +686,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(invoker.lastArgs, Vector("--help"))
     output.contains("Launcher help:") shouldBe true
     output.contains("cncf launcher version") shouldBe true
+    output.contains("[--runtime <version>] [--runtime-dev-dir <dir>] <target> command") shouldBe true
+    output.contains("runtime.dev-dir is the configuration equivalent of --runtime-dev-dir") shouldBe true
+    output.contains("ancestor conf/cncf/launcher.yaml and .cncf/launcher.yaml") shouldBe true
     _assert_equals(CncfCommandParser.parse(Vector("help")), CncfCommand.RuntimeHelp)
     _assert_equals(CncfCommandParser.parse(Vector("--help")), CncfCommand.RuntimeHelp)
     _assert_equals(CncfCommandParser.parse(Vector("launcher", "help")), CncfCommand.LauncherHelp)
@@ -1728,6 +1731,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     help.contains("dev-server.pid") shouldBe true
     help.contains("descriptor source metadata lives under src/main/web-inf") shouldBe true
     help.contains("textus server <artifact> is the CAR/SAR artifact launcher") shouldBe true
+    help.contains("ancestor conf/cncf/config.yaml and .cncf/config.yaml") shouldBe true
   }
 
   def devCheckReportsMainTargetAndDependencyResolution(): Unit = _with_temp_paths { paths =>
