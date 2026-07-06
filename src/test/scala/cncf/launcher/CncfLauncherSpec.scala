@@ -9,7 +9,8 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 29, 2026
+ *  version Jun. 29, 2026
+ * @version Jul.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -635,7 +636,23 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "command",
       "validate-presentation"
     )).asInstanceOf[CncfCommand.Execute]
-    _assert_equals(currenttarget.args, Vector("command", "validate-presentation"))
+    _assert_equals(currenttarget.args, Vector("command", "--component-dev-dir=.", "validate-presentation"))
+
+    val explicitcurrenttarget = CncfCommandParser.parse(Vector(
+      ".",
+      "command",
+      "validate-presentation"
+    )).asInstanceOf[CncfCommand.Execute]
+    _assert_equals(explicitcurrenttarget.args, Vector("command", "--component-dev-dir=.", "validate-presentation"))
+
+    val packagedtarget = CncfCommandParser.parse(Vector(
+      "command",
+      "--no-project-classpath",
+      "--component-car-dir",
+      "car.d",
+      "testcomp.main.hello"
+    )).asInstanceOf[CncfCommand.Execute]
+    _assert_equals(packagedtarget.args, Vector("command", "--no-project-classpath", "--component-car-dir", "car.d", "testcomp.main.hello"))
 
     val namedtarget = CncfCommandParser.parse(Vector(
       "textus-sanpomap:1",
@@ -1715,20 +1732,16 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
   def devHelpExplainsResolutionModel(): Unit = {
     val help = CncfCommandParser.helpText
-    help.contains("Development resolution:") shouldBe true
-    help.contains("defaults to --project-dev .") shouldBe true
-    help.contains("--name <artifact>[:<version>]") shouldBe true
-    help.contains("--car-file <file>") shouldBe true
-    help.contains("--project-car <dir>") shouldBe true
-    help.contains("repository lookup is disabled") shouldBe true
+    help.contains("Execution:") shouldBe true
+    help.contains("cncf command/server/client forwards to CncfMain") shouldBe true
+    help.contains("Target-first execution adds target activation") shouldBe true
+    help.contains("Low-level dev commands:") shouldBe false
+    help.contains("cncf dev server") shouldBe false
+    help.contains("dev-server.pid") shouldBe false
     help.contains("--component-dev-dir <dir> is a dependency component local override") shouldBe true
     help.contains("cozyPublishLocalCar") shouldBe true
     help.contains("~/.cncf/local is developer local publish state") shouldBe true
     help.contains("Snapshot components are local-only") shouldBe true
-    help.contains("component.d and repository.d are not used implicitly") shouldBe true
-    help.contains("cncf dev stop") shouldBe true
-    help.contains("--stop-existing") shouldBe true
-    help.contains("dev-server.pid") shouldBe true
     help.contains("descriptor source metadata lives under src/main/web-inf") shouldBe true
     help.contains("textus server <artifact> is the CAR/SAR artifact launcher") shouldBe true
     help.contains("ancestor conf/cncf/config.yaml and .cncf/config.yaml") shouldBe true

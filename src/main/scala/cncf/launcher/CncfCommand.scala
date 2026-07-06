@@ -2,7 +2,8 @@ package cncf.launcher
 
 /*
  * @since   May. 17, 2026
- * @version Jun. 29, 2026
+ *  version Jun. 29, 2026
+ * @version Jul.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -32,6 +33,8 @@ object CncfCommand {
     runtimeDevDir: Option[String]
   ) extends CncfCommand
 
+  // Deprecated compatibility surface. Keep parsing/execution for existing
+  // scripts, but do not advertise cncf dev commands in public help.
   sealed trait Dev extends CncfCommand {
     def options: DevOptions
   }
@@ -291,19 +294,23 @@ object CncfCommandParser {
   private def _runtime_execute_args(args: Vector[String]): Vector[String] =
     args match {
       case Vector(mode, _*) if _is_target_mode(mode) =>
-        args
+        mode +: (_current_project_runtime_args(args.tail) ++ args.tail)
       case Vector(target, mode, rest @ _*) if !target.startsWith("-") && !_is_reserved_target(target) && _is_target_mode(mode) =>
         mode +: (_target_runtime_args(target) ++ rest.toVector)
       case _ =>
         args
     }
 
+  private def _current_project_runtime_args(args: Vector[String]): Vector[String] =
+    if (_has_explicit_activation(args)) Vector.empty
+    else Vector("--component-dev-dir=.")
+
   private def _target_runtime_args(target: String): Vector[String] = {
     val trimmed = target.trim
     if (trimmed.isEmpty)
       throw CncfException("cncf target is empty")
     else if (trimmed == ".")
-      Vector.empty
+      Vector("--component-dev-dir=.")
     else if (trimmed.endsWith(".car"))
       Vector(s"--component-file=${trimmed}")
     else if (trimmed.endsWith(".sar"))
@@ -317,6 +324,25 @@ object CncfCommandParser {
       Vector(Some(s"--textus.component=${name}"), version.map(v => s"--textus.component.version=${v}")).flatten
     }
   }
+
+  private def _has_explicit_activation(args: Vector[String]): Boolean =
+    args.exists { x =>
+      x == "--no-project-classpath" ||
+      x == "--component-dev-dir" ||
+      x.startsWith("--component-dev-dir=") ||
+      x == "--component-car-dir" ||
+      x.startsWith("--component-car-dir=") ||
+      x == "--subsystem-sar-dir" ||
+      x.startsWith("--subsystem-sar-dir=") ||
+      x == "--component-file" ||
+      x.startsWith("--component-file=") ||
+      x == "--subsystem-file" ||
+      x.startsWith("--subsystem-file=") ||
+      x == "--textus.component" ||
+      x.startsWith("--textus.component=") ||
+      x == "--textus.subsystem" ||
+      x.startsWith("--textus.subsystem=")
+    }
 
   private def _is_path_like_target(value: String): Boolean =
     value.contains("/") || value == ".." || value.startsWith("~")
@@ -585,14 +611,6 @@ object CncfCommandParser {
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] command <operation> [args...]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] server [args...]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] client [args...]
-      |  cncf --config etc/launcher/debug.yaml --cncf-config etc/debug.yaml dev server
-      |  cncf dev classpath [--project-dev <dir>]
-      |  cncf dev check [--project-dev <dir>] [--runtime-dev-dir <dir>]
-      |  cncf dev server [--project-dev <dir>|--name <artifact>[:<version>]|--car-file <file>|--project-car <dir>] [--runtime-dev-dir <dir>] [--port <port>] [--stop-existing|--restart] [--force-existing] [--profile local-persistent] [--component-dev-dir <dir>...] [runtime args...]
-      |  cncf dev stop [--project-dev <dir>] [--port <port>] [--force-existing]
-      |  cncf dev server-emulation [--project-dev <dir>] [--runtime-dev-dir <dir>] <component.service.operation|component/service/operation|url>
-      |  cncf dev client [--project-dev <dir>] [--runtime-dev-dir <dir>] [args...]
-      |  cncf dev command [--project-dev <dir>] [--runtime-dev-dir <dir>] [--no-project-classpath] [runtime args...] <operation> [params...]
       |  cncf runtime current
       |  cncf runtime list
       |  cncf runtime local list
@@ -628,25 +646,15 @@ object CncfCommandParser {
       |  Launcher conf/properties files support dotted key assignments such as runtime.dev-dir = <cncf-runtime-checkout>.
       |  Config cncf.launcher.dev.dir selects an sbt checkout for the launcher itself.
       |  Full JSON/XML/HOCON are CNCF runtime config formats, not launcher config formats.
-      |  Runtime args before server/client/command are forwarded to CncfMain.
-      |  --profile local-persistent configures target/cncf.d/runtime.sqlite as the local SQLite DataStore for development checks.
-      |  Config dev.project-dev is the configuration equivalent of --project-dev.
-      |  Config dev.restart: true is the configuration equivalent of --restart / --stop-existing.
       |
-      |Development resolution:
-      |  cncf dev server defaults to --project-dev . and starts the current development project from source.
-      |  --project-dev <dir> selects a development project; repository lookup is disabled for this main target.
-      |  --name <artifact>[:<version>] starts a CAR/SAR artifact from configured repositories.
-      |  --car-file <file> starts a CAR/SAR file directly.
-      |  --project-car <dir> starts an explicitly generated CAR/SAR from a project target directory.
-      |  The project-dev main target uses target/cncf.d/runtime-classpath.txt.
-      |  Missing or empty main target classpath is generated automatically; run cncf dev classpath --project-dev <dir> to prepare it manually.
-      |  cncf dev server records process state in target/cncf.d/dev-server.pid and dev-server.json.
-      |  A live server for the same project and port is not stopped by default; use --stop-existing or --restart to stop it before starting.
-      |  --force-existing permits force stop after graceful stop fails or ambiguous state overwrite.
-      |  cncf dev stop stops the recorded dev server for the selected project and port without starting a new server.
-      |  --profile local-persistent stores development DataStore state in target/cncf.d/runtime.sqlite.
-      |  The same profile can be configured as dev.profile: local-persistent in conf/cncf/launcher.yaml.
+      |Execution:
+      |  cncf command/server/client forwards to CncfMain using the selected runtime and runtime configuration.
+      |  Runtime args before server/client/command are forwarded to CncfMain.
+      |  Target-first execution adds target activation before command/server/client.
+      |  <target> may be a component name, component:version, .car file, .sar file, or local component development directory.
+      |  Named targets are resolved through configured component/subsystem repositories.
+      |  File targets activate that packaged artifact directly.
+      |  Component source directories used as targets are passed as component-dev-dir runtime activation.
       |  Launcher settings load from ~/.cncf/launcher.yaml, ancestor conf/cncf/launcher.yaml and .cncf/launcher.yaml files, then cwd conf/cncf/launcher.yaml and .cncf/launcher.yaml.
       |  CNCF runtime settings load from ~/.cncf/config.yaml, ancestor conf/cncf/config.yaml and .cncf/config.yaml files, then cwd conf/cncf/config.yaml and .cncf/config.yaml.
       |  --component-dev-dir <dir> is a dependency component local override; missing dependency classpath is an error.
@@ -658,11 +666,5 @@ object CncfCommandParser {
       |  Web app source lives under src/main/web; descriptor source metadata lives under src/main/web-inf.
       |  src/main/web/WEB-INF is for private Web resources, not generated descriptor source.
       |  textus server <artifact> is the CAR/SAR artifact launcher for repository-based application startup.
-      |
-      |Dev target policy:
-      |  Target options are mutually exclusive. No target option means --project-dev .
-      |  component.d and repository.d are not used implicitly by cncf dev server.
-      |  --no-project-classpath invokes packaged CAR/SAR artifacts without current project classes.
-      |  --no-project-component-dev-dir keeps project classes on the launcher classpath without adding project as component-dev-dir.
       |""".stripMargin
 }
