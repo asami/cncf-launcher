@@ -1,8 +1,8 @@
 import org.goldenport.cozy.CozyPlugin.autoImport._
 
 ThisBuild / organization := "org.goldenport"
-ThisBuild / version := "0.1.6"
-ThisBuild / scalaVersion := "3.3.7"
+ThisBuild / version := "0.1.7-SNAPSHOT"
+ThisBuild / scalaVersion := "3.3.8"
 ThisBuild / publishMavenStyle := true
 
 resolvers += "SimpleModeling.org" at "https://www.simplemodeling.org/repository/maven"
