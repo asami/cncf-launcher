@@ -10,7 +10,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul.  6, 2026
+ * @version Jul. 13, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -26,7 +26,7 @@ object CncfLauncherSpec {
     spec.configSupportsAdditionalRdfNamespaces()
     spec.configFileOptionOverridesProjectConfig()
     spec.workspaceRootConfigAppliesToNestedCwd()
-    spec.environmentSelectsDevelopmentRuntime()
+    spec.launcherConfigControlsDevelopmentRuntime()
     spec.launcherConfigSupportsPropertiesAndConfFiles()
     spec.defaultRuntimeConfigFilesAreForwarded()
     spec.configFileProjectDevSurvivesTargetCwdSwitch()
@@ -173,8 +173,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         workspaceRootConfigAppliesToNestedCwd()
       }
 
-      "environment selects development runtime" in {
-        environmentSelectsDevelopmentRuntime()
+      "launcher config controls development runtime" in {
+        launcherConfigControlsDevelopmentRuntime()
       }
 
       "launcher config supports properties and conf files" in {
@@ -898,31 +898,159 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     config.cncfConfigFiles.exists(_.contains("work/.cncf/config.yaml")) shouldBe true
   }
 
-  def environmentSelectsDevelopmentRuntime(): Unit = _with_temp_paths { paths =>
-    Given("a project config contains development runtime and launcher candidates")
+  def launcherConfigControlsDevelopmentRuntime(): Unit = _with_temp_paths { paths =>
+    Given("a launcher config contains disabled development runtime and launcher candidates")
     _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
       """development:
+        |  enabled: false
         |  launcher:
         |    dev-dir: ../candidate-launcher
         |  runtime:
         |    dev-dir: ../candidate-runtime
         |""".stripMargin)
 
-    When("the launcher loads config without the development flag")
+    When("the launcher loads the disabled development configuration")
     val inert = LauncherConfig.load(paths, Vector.empty, Map.empty)
 
     Then("the development candidates are recorded but not activated")
+    _assert_equals(inert.developmentEnabled, Some(false))
     _assert_equals(inert.launcherDevDir, None)
     _assert_equals(inert.runtimeDevDir, None)
     _assert_equals(inert.developmentLauncherDevDir, Some("../candidate-launcher"))
     _assert_equals(inert.developmentRuntimeDevDir, Some("../candidate-runtime"))
 
-    When("the launcher loads config with development enabled")
-    val active = LauncherConfig.load(paths, Vector.empty, Map("CNCF_USE_DEVELOPMENT" -> "true"))
+    When("development.enabled is changed to true in the same launcher config")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  enabled: true
+        |  launcher:
+        |    dev-dir: ../candidate-launcher
+        |  runtime:
+        |    dev-dir: ../candidate-runtime
+        |""".stripMargin)
+    val active = LauncherConfig.load(paths, Vector.empty, Map.empty)
 
     Then("the development launcher and runtime candidates become active")
+    _assert_equals(active.developmentEnabled, Some(true))
     _assert_equals(active.launcherDevDir, Some("../candidate-launcher"))
     _assert_equals(active.runtimeDevDir, Some("../candidate-runtime"))
+
+    When("the launcher section enables only the development launcher")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  enabled: false
+        |  launcher:
+        |    enabled: true
+        |    dev-dir: ../candidate-launcher
+        |  runtime:
+        |    enabled: false
+        |    dev-dir: ../candidate-runtime
+        |""".stripMargin)
+    val launcheronly = LauncherConfig.load(paths, Vector.empty, Map.empty)
+
+    Then("the runtime remains published while the launcher delegates to its checkout")
+    _assert_equals(launcheronly.launcherDevDir, Some("../candidate-launcher"))
+    _assert_equals(launcheronly.runtimeDevDir, None)
+
+    When("the runtime section enables only the development runtime")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  enabled: false
+        |  launcher:
+        |    enabled: false
+        |    dev-dir: ../candidate-launcher
+        |  runtime:
+        |    enabled: true
+        |    dev-dir: ../candidate-runtime
+        |""".stripMargin)
+    val runtimeonly = LauncherConfig.load(paths, Vector.empty, Map.empty)
+
+    Then("the installed launcher selects only the runtime checkout")
+    _assert_equals(runtimeonly.launcherDevDir, None)
+    _assert_equals(runtimeonly.runtimeDevDir, Some("../candidate-runtime"))
+
+    Given("the launcher development switch is enabled without a candidate directory")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  enabled: false
+        |  launcher:
+        |    enabled: true
+        |  runtime:
+        |    enabled: false
+        |""".stripMargin)
+
+    When("the incomplete launcher configuration is loaded")
+    val missinglauncher = intercept[CncfException] {
+      LauncherConfig.load(paths, Vector.empty, Map.empty)
+    }
+
+    Then("the missing launcher directory is reported deterministically")
+    missinglauncher.getMessage should include("development.launcher.dev-dir is required")
+
+    Given("the runtime development switch is enabled without a candidate directory")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  enabled: false
+        |  launcher:
+        |    enabled: false
+        |  runtime:
+        |    enabled: true
+        |""".stripMargin)
+
+    When("the incomplete runtime configuration is loaded")
+    val missingruntime = intercept[CncfException] {
+      LauncherConfig.load(paths, Vector.empty, Map.empty)
+    }
+
+    Then("the missing runtime directory is reported deterministically")
+    missingruntime.getMessage should include("development.runtime.dev-dir is required")
+
+    Given("both development switches are enabled without configured candidate directories")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  enabled: true
+        |""".stripMargin)
+
+    When("emergency environment overrides provide both directories")
+    val emergency = LauncherConfig.load(paths, Vector.empty, Map(
+      "CNCF_RUNTIME_DEV_DIR" -> "../emergency-runtime",
+      "CNCF_LAUNCHER_DEV_DIR" -> "../emergency-launcher"
+    ))
+
+    Then("the explicit overrides satisfy the enabled development selections")
+    _assert_equals(emergency.runtimeDevDir, Some("../emergency-runtime"))
+    _assert_equals(emergency.launcherDevDir, Some("../emergency-launcher"))
+
+    When("the removed environment activation flag is present")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """development:
+        |  enabled: false
+        |  launcher:
+        |    dev-dir: ../candidate-launcher
+        |  runtime:
+        |    dev-dir: ../candidate-runtime
+        |""".stripMargin)
+    val legacyenvironment = LauncherConfig.load(paths, Vector.empty, Map("CNCF_USE_DEVELOPMENT" -> "true"))
+
+    Then("the file switch remains authoritative")
+    _assert_equals(legacyenvironment.launcherDevDir, None)
+    _assert_equals(legacyenvironment.runtimeDevDir, None)
+
+    When("a higher-priority project config disables globally enabled development candidates")
+    _write(paths.cncfHome.resolve("launcher.yaml"),
+      """development:
+        |  enabled: true
+        |  launcher:
+        |    dev-dir: ../global-launcher
+        |  runtime:
+        |    dev-dir: ../global-runtime
+        |""".stripMargin)
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"), "development:\n  enabled: false\n")
+    val disabledoverride = LauncherConfig.load(paths, Vector.empty, Map.empty)
+
+    Then("the project switch disables inherited development directories")
+    _assert_equals(disabledoverride.launcherDevDir, None)
+    _assert_equals(disabledoverride.runtimeDevDir, None)
 
     When("explicit environment overrides are supplied")
     val env = LauncherConfig.load(paths, Vector.empty, Map(
