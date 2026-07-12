@@ -1,0 +1,16 @@
+schemaVersion: 1
+kind: car
+artifactId: cncf-launcher
+recommended: 0.2.0
+latestStable: 0.2.0
+status: active
+aliases: []
+versions:
+  - version: 0.2.0
+    channel: stable
+    status: active
+    component: cncf-launcher
+    publishedAt: 2026-07-12T20:12:14.376301+09:00
+    file: repository/car/cncf-launcher/0.2.0/cncf-launcher-0.2.0.car
+    checksum:
+      sha256: 3b12f3464858451eee2195063ac61be15c19db6a02672cbd2b2c3fb6e088482f
