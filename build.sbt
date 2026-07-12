@@ -1,7 +1,7 @@
 import org.goldenport.cozy.CozyPlugin.autoImport._
 
 ThisBuild / organization := "org.goldenport"
-ThisBuild / version := "0.2.1-SNAPSHOT"
+ThisBuild / version := "0.2.1"
 ThisBuild / scalaVersion := "3.3.8"
 ThisBuild / publishMavenStyle := true
 
