@@ -1,8 +1,10 @@
 package cncf.launcher
 
+import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util.zip.{ZipEntry, ZipOutputStream}
@@ -38,6 +40,9 @@ object CncfLauncherSpec {
     spec.installCliWritesDevelopmentCommand()
     spec.installCliPinsDevelopmentRuntimeWithoutCatalog()
     spec.installCliRejectsIncompatibleDevelopmentRuntime()
+    spec.textusAdminRegistrationLifecycle()
+    spec.textusAdminRegistrationHttpLifecycle()
+    spec.textusAdminRegistrationHttpFailureIsolation()
     spec.executeTargetFirstDelegatesToRuntime()
     spec.runtimeCatalogParseAndSelectorResolution()
     spec.runtimeCatalogCommands()
@@ -285,6 +290,27 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the launcher installs a development command")
         Then("the incompatible runtime is rejected before a wrapper is written")
         installCliRejectsIncompatibleDevelopmentRuntime()
+      }
+
+      "canonical server commands report one Textus Admin lifecycle" in {
+        Given("opt-in Textus Admin registration and current-project and target-first server commands")
+        When("each canonical server invocation completes")
+        Then("each invocation is registered and deregistered without including the deprecated dev server")
+        textusAdminRegistrationLifecycle()
+      }
+
+      "Textus Admin reporter calls automatic REST operations" in {
+        Given("a reachable automatic Textus Admin REST endpoint")
+        When("a CNCF registration session starts and closes")
+        Then("register and deregister requests carry only the configured bearer credential and safe protocol fields")
+        textusAdminRegistrationHttpLifecycle()
+      }
+
+      "Textus Admin authorization rejection is isolated from server lifecycle" in {
+        Given("an automatic REST endpoint that rejects the launcher credential")
+        When("a CNCF registration session starts and closes")
+        Then("the reporter makes no retry loop and does not propagate the rejection")
+        textusAdminRegistrationHttpFailureIsolation()
       }
 
       "target-first execution delegates to runtime" in {
@@ -1309,6 +1335,154 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     Files.exists(paths.home.resolve("bin").resolve("sanpomap-dev")) shouldBe false
   }
 
+  def textusAdminRegistrationLifecycle(): Unit = _with_temp_paths { paths =>
+    Given("a CNCF launcher with opt-in Textus Admin registration")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      """textus-admin:
+        |  registration:
+        |    enabled: true
+        |    endpoint: https://admin.example.test/rest/v1/textus-admin/subsystem-inventory
+        |    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
+        |    timeout: 2s
+        |    heartbeat-interval: 30s
+        |    host-label: acceptance
+        |    base-url: https://subsystem.example.test
+        |""".stripMargin)
+    val reporter = FakeCncfTextusAdminRegistrationReporter()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      invoker,
+      environment = Map("TEXTUS_ADMIN_REGISTRATION_TOKEN" -> "secret-token"),
+      registrationreporter = reporter
+    )
+
+    When("the target-first canonical server command completes")
+    val targetfirstcode = launcher.run(Vector("textus-registration:0.1.0", "server"))
+
+    Then("the launcher reports the resolved target, version, and only the selected credential")
+    _assert_equals(targetfirstcode, 0)
+    _assert_equals(reporter.starts.size, 1)
+    _assert_equals(reporter.closes, 1)
+    _assert_equals(reporter.starts.head._1.target, "textus-registration")
+    _assert_equals(reporter.starts.head._1.subsystemName, Some("textus-registration"))
+    _assert_equals(reporter.starts.head._1.subsystemVersion, Some("0.1.0"))
+    _assert_equals(reporter.starts.head._2, Some("secret-token"))
+    invoker.lastArgs.head shouldBe "server"
+
+    When("the current-project canonical server command completes")
+    val currentprojectcode = launcher.run(Vector("server"))
+
+    Then("it reports a distinct current-project invocation through the same lifecycle")
+    _assert_equals(currentprojectcode, 0)
+    _assert_equals(reporter.starts.size, 2)
+    _assert_equals(reporter.closes, 2)
+    _assert_equals(reporter.starts(1)._1.target, "current-project")
+    _assert_equals(reporter.starts(1)._1.subsystemName, None)
+
+    And("registration setup failure does not prevent canonical server startup")
+    val outageinvoker = FakeInvoker()
+    val outage = new CncfTextusAdminRegistrationOutageReporter
+    val outagelauncher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      outageinvoker,
+      environment = Map("TEXTUS_ADMIN_REGISTRATION_TOKEN" -> "secret-token"),
+      registrationreporter = outage
+    )
+    val outagecode = outagelauncher.run(Vector("textus-registration:0.1.0", "server"))
+    _assert_equals(outagecode, 0)
+    outageinvoker.lastArgs.head shouldBe "server"
+  }
+
+  def textusAdminRegistrationHttpLifecycle(): Unit = {
+    Given("a reachable Textus Admin automatic REST endpoint")
+    val requests = scala.collection.mutable.ArrayBuffer.empty[(String, String)]
+    val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    server.createContext("/", new HttpHandler {
+      override def handle(exchange: HttpExchange): Unit = {
+        requests += exchange.getRequestURI.toString -> exchange.getRequestHeaders.getFirst("Authorization")
+        exchange.sendResponseHeaders(204, -1)
+        exchange.close()
+      }
+    })
+    server.start()
+    try {
+      val config = CncfTextusAdminRegistrationConfig(
+        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-admin/subsystem-inventory",
+        tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
+        timeout = java.time.Duration.ofSeconds(1),
+        heartbeatInterval = java.time.Duration.ofSeconds(30),
+        hostLabel = "acceptance",
+        baseUrl = "https://subsystem.example.test"
+      )
+      val report = CncfTextusAdminRegistrationReport(
+        instanceId = "cncf-registration-http-spec",
+        target = "textus-registration",
+        subsystemName = Some("textus-registration"),
+        subsystemVersion = Some("0.1.0"),
+        runtimeVersion = "0.5.0",
+        startedAt = java.time.Instant.parse("2026-07-18T00:00:00Z")
+      )
+
+      When("the reporter starts and closes one server registration session")
+      val session = CncfTextusAdminRegistrationReporter.System.start(config, report, Some("test-token"))
+      session.close()
+
+      Then("it sends register and deregister automatic REST operations with the configured bearer credential")
+      requests.map(_._1).exists(_.contains("register-subsystem")) shouldBe true
+      requests.map(_._1).exists(_.contains("deregister-subsystem")) shouldBe true
+      requests.forall(_._2 == "Bearer test-token") shouldBe true
+      requests.forall { case (path, _) => path.contains("instanceId=cncf-registration-http-spec") } shouldBe true
+    } finally {
+      server.stop(0)
+    }
+  }
+
+  def textusAdminRegistrationHttpFailureIsolation(): Unit = {
+    Given("a Textus Admin endpoint that rejects a launcher registration")
+    val requests = scala.collection.mutable.ArrayBuffer.empty[String]
+    val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    server.createContext("/", new HttpHandler {
+      override def handle(exchange: HttpExchange): Unit = {
+        requests += exchange.getRequestURI.toString
+        exchange.sendResponseHeaders(401, -1)
+        exchange.close()
+      }
+    })
+    server.start()
+    try {
+      val config = CncfTextusAdminRegistrationConfig(
+        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-admin/subsystem-inventory",
+        tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
+        timeout = java.time.Duration.ofSeconds(1),
+        heartbeatInterval = java.time.Duration.ofSeconds(30),
+        hostLabel = "acceptance",
+        baseUrl = "https://subsystem.example.test"
+      )
+      val report = CncfTextusAdminRegistrationReport(
+        instanceId = "cncf-registration-http-failure-spec",
+        target = "textus-registration",
+        subsystemName = Some("textus-registration"),
+        subsystemVersion = Some("0.1.0"),
+        runtimeVersion = "0.5.0",
+        startedAt = java.time.Instant.parse("2026-07-18T00:00:00Z")
+      )
+
+      When("the reporter receives authorization rejection for registration and deregistration")
+      val session = CncfTextusAdminRegistrationReporter.System.start(config, report, Some("rejected-token"))
+      session.close()
+
+      Then("it performs exactly one bounded request for each lifecycle transition without a retry loop")
+      _assert_equals(requests.size, 2)
+      requests.exists(_.contains("register-subsystem")) shouldBe true
+      requests.exists(_.contains("deregister-subsystem")) shouldBe true
+    } finally {
+      server.stop(0)
+    }
+  }
+
   def executeTargetFirstDelegatesToRuntime(): Unit = _with_temp_paths { paths =>
     _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"), "runtime:\n  version: 0.4.12\n")
     val resolver = FakeResolver()
@@ -1512,11 +1686,19 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
          |  port: 19600
          |  componentDevDirs:
          |    - ../account
+         |textus-admin:
+         |  registration:
+         |    enabled: true
+         |    endpoint: https://admin.example.test/rest/v1/textus-admin/subsystem-inventory
+         |    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
+         |    host-label: acceptance
+         |    base-url: https://subsystem.example.test
          |""".stripMargin)
     Files.createDirectories(paths.cwd.getParent.resolve("account"))
     _write(paths.cwd.getParent.resolve("account").resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     val invoker = FakeInvoker()
-    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+    val reporter = FakeCncfTextusAdminRegistrationReporter()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker, registrationreporter = reporter)
     launcher.run(Vector("dev", "server"))
     _assert_equals(invoker.lastArgs.take(4), Vector(
       "--component-dev-dir",
@@ -1526,6 +1708,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     ))
     invoker.lastArgs.contains("server") shouldBe true
     invoker.lastClasspath.contains(classdir) shouldBe true
+    _assert_equals(reporter.starts, Vector.empty)
   }
 
   def devServerWritesStateDuringInvocation(): Unit = _with_temp_paths { paths =>
@@ -2454,6 +2637,35 @@ final class FakeInvoker extends CncfInvoker {
 
 object FakeInvoker {
   def apply(): FakeInvoker = new FakeInvoker()
+}
+
+final class FakeCncfTextusAdminRegistrationReporter extends CncfTextusAdminRegistrationReporter {
+  var starts: Vector[(CncfTextusAdminRegistrationReport, Option[String])] = Vector.empty
+  var closes: Int = 0
+
+  def start(
+    config: CncfTextusAdminRegistrationConfig,
+    report: CncfTextusAdminRegistrationReport,
+    token: Option[String]
+  ): CncfTextusAdminRegistrationSession = {
+    starts :+= report -> token
+    new CncfTextusAdminRegistrationSession {
+      def close(): Unit = closes += 1
+    }
+  }
+}
+
+object FakeCncfTextusAdminRegistrationReporter {
+  def apply(): FakeCncfTextusAdminRegistrationReporter = new FakeCncfTextusAdminRegistrationReporter()
+}
+
+final class CncfTextusAdminRegistrationOutageReporter extends CncfTextusAdminRegistrationReporter {
+  def start(
+    config: CncfTextusAdminRegistrationConfig,
+    report: CncfTextusAdminRegistrationReport,
+    token: Option[String]
+  ): CncfTextusAdminRegistrationSession =
+    throw CncfException("simulated Textus Admin outage")
 }
 
 final class FakeLauncherDevInvoker extends LauncherDevInvoker {

@@ -18,7 +18,8 @@ final class CncfLauncher(
   classpathexporter: RuntimeClasspathExporter = SbtRuntimeClasspathExporter,
   processmanager: DevServerProcessManager = DevServerProcessManager.System,
   launcherdevinvoker: LauncherDevInvoker = LauncherDevInvoker.System,
-  environment: Map[String, String] = sys.env
+  environment: Map[String, String] = sys.env,
+  registrationreporter: CncfTextusAdminRegistrationReporter = CncfTextusAdminRegistrationReporter.System
 ) {
   def run(args: Vector[String]): Int = {
     val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
@@ -308,15 +309,69 @@ final class CncfLauncher(
     config: LauncherConfig
   ): Int = {
     val store = RuntimeVersionStore(paths)
+    val runtimeversion = command.runtimeDevDir.orElse(config.runtimeDevDir) match {
+      case Some(dir) =>
+        _development_runtime_version(paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
+      case None =>
+        runtimeresolver.resolveVersion(store.current(command.runtimeVersion, config), config, paths)
+    }
     val classpath = command.runtimeDevDir.orElse(config.runtimeDevDir) match {
       case Some(dir) =>
         DevSupport(paths, classpathexporter, processmanager)
           .cncfRuntimeClasspath(paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
       case None =>
-        val runtimeversion = store.current(command.runtimeVersion, config)
         runtimeresolver.resolve(runtimeversion, config, paths)
     }
-    cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ command.args)
+    val session = _registration_session(command, runtimeversion, config)
+    try {
+      cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ command.args)
+    } finally {
+      session.close()
+    }
+  }
+
+  private def _registration_session(
+    command: CncfCommand.Execute,
+    runtimeversion: String,
+    config: LauncherConfig
+  ): CncfTextusAdminRegistrationSession =
+    if (!command.args.headOption.contains("server")) {
+      CncfTextusAdminRegistrationSession.noop
+    } else {
+      config.textusAdminRegistration match {
+        case Some(registration) =>
+          try {
+            val target = _registration_target(command.args)
+            registrationreporter.start(
+              registration,
+              CncfTextusAdminRegistrationReport(
+                instanceId = java.util.UUID.randomUUID().toString,
+                target = target._1,
+                subsystemName = target._2,
+                subsystemVersion = target._3,
+                runtimeVersion = runtimeversion,
+                startedAt = java.time.Instant.now()
+              ),
+              environment.get(registration.tokenEnv)
+            )
+          } catch {
+            case _: Throwable =>
+              Console.err.println("warning: Textus Admin registration setup failed; continuing server startup.")
+              CncfTextusAdminRegistrationSession.noop
+          }
+        case None => CncfTextusAdminRegistrationSession.noop
+      }
+    }
+
+  private def _registration_target(args: Vector[String]): (String, Option[String], Option[String]) = {
+    def _option_(name: String): Option[String] =
+      args.collectFirst { case value if value.startsWith(name) => value.stripPrefix(name) }.filter(_.nonEmpty)
+    def _file_name_(value: String): String =
+      Option(java.nio.file.Path.of(value).getFileName).map(_.toString).filter(_.nonEmpty).getOrElse(value)
+
+    val subsystemname = _option_("--textus.component=")
+    val target = subsystemname.orElse(_option_("--component-dev-dir=").filter(_ != ".").map(_file_name_)).orElse(_option_("--component-file=").map(_file_name_)).orElse(_option_("--subsystem-file=").map(_file_name_)).getOrElse("current-project")
+    (target, subsystemname, _option_("--textus.component.version="))
   }
 
   private def _run_install_cli(

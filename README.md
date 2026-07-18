@@ -185,6 +185,32 @@ development:
 
 Section `enabled` values take precedence over `development.enabled`.
 
+### Optional Textus Admin subsystem registration
+
+Textus Admin can list Subsystem processes started by canonical CNCF server
+commands. Registration is opt-in and applies only to `cncf server` and
+`cncf <target> server`; deprecated `cncf dev server` is not a registration
+source.
+
+```yaml
+textus-admin:
+  registration:
+    enabled: true
+    endpoint: https://admin.example.test/rest/v1/textus-admin/subsystem-inventory
+    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
+    timeout: 2s
+    heartbeat-interval: 30s
+    host-label: development-a
+    base-url: https://subsystem.example.test
+```
+
+`endpoint` is the Textus Admin subsystem-inventory operation base URL. The
+launcher sends register, heartbeat, and deregister requests with the bearer
+credential named by `token-env`; it never writes or prints the credential
+value. Requests use the configured bounded timeout. Missing credentials,
+authorization rejection, and Textus Admin outages emit a sanitized warning but
+do not prevent the target server from starting.
+
 Higher-precedence project launcher configuration may override the global
 switch. In normal operation, `launcher.yaml` is the single place that controls
 development selection. CLI development-directory options and their direct
