@@ -8,7 +8,7 @@ import scala.util.Try
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jun. 29, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -353,38 +353,60 @@ final class CncfLauncher(
       else
         LauncherConfig.load(effectivepaths, configfiles, environment).mergeHigher(explicitconfig)
     val store = RuntimeVersionStore(effectivepaths)
-    val basecatalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
+    val hasdevelopmentruntime = options.runtimeDevDir.orElse(config.runtimeDevDir).isDefined
+    val basecatalog =
+      if (hasdevelopmentruntime) None
+      else RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
     val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
     val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
     val effectiveoptions = options.copy(
       target = _normalize_dev_target(_config_dev_target(options.target, baseconfig))
     )
     val rawcontext = devsupport.context(effectiveoptions, baseconfig, store)
-    val catalog =
-      rawcontext.runtimeDevDir.flatMap(RuntimeCatalogStore.loadRuntimeDevelopmentCatalog)
-        .orElse(basecatalog)
+    val catalog = rawcontext.runtimeDevDir match {
+      case Some(dir) => RuntimeCatalogStore.loadRuntimeDevelopmentCatalog(dir)
+      case None => basecatalog
+    }
     val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
-    val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
-      orElse(effectiveconfig.runtimeSelectionPolicy).
-      getOrElse(RuntimeSelectionPolicy.CurrentCompatible)
-    val policy = effectiveoptions.runtimeNoCompatiblePolicy.orElse(effectiveconfig.runtimeNoCompatiblePolicy).getOrElse(RuntimeNoCompatiblePolicy.Error)
-    val runtimeversion = RuntimeVersionSelection.select(
-      requested = effectiveoptions.runtimeVersion,
-      stored = store.current(None, effectiveconfig),
-      requirements = rawcontext.runtimeRequirements,
-      catalog = catalog,
-      selectionPolicy = selectionpolicy,
-      policy = policy
-    )
     val runtimedevdir = rawcontext.runtimeDevDir.map(_.toString)
+    val runtimeversion = rawcontext.runtimeDevDir match {
+      case Some(dir) =>
+        _validate_development_runtime(dir, rawcontext.runtimeRequirements)
+        None
+      case None =>
+        val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
+          orElse(effectiveconfig.runtimeSelectionPolicy).
+          getOrElse(RuntimeSelectionPolicy.CurrentCompatible)
+        val policy = effectiveoptions.runtimeNoCompatiblePolicy.orElse(effectiveconfig.runtimeNoCompatiblePolicy).getOrElse(RuntimeNoCompatiblePolicy.Error)
+        Some(RuntimeVersionSelection.select(
+          requested = effectiveoptions.runtimeVersion,
+          stored = store.current(None, effectiveconfig),
+          requirements = rawcontext.runtimeRequirements,
+          catalog = catalog,
+          selectionPolicy = selectionpolicy,
+          policy = policy
+        ))
+    }
     command.copy(
-      runtimeVersion = if (runtimedevdir.isDefined) None else Some(runtimeversion),
+      runtimeVersion = runtimeversion,
       runtimeSelectionPolicy = None,
       runtimeNoCompatiblePolicy = None,
       runtimeDevDir = runtimedevdir,
       launcherDevDir = effectiveconfig.launcherDevDir.map(p => effectivepaths.cwd.resolve(p).normalize.toAbsolutePath.normalize.toString),
       componentDevDirs = rawcontext.componentDevDirs.map(_.toString)
     )
+  }
+
+  private def _validate_development_runtime(
+    runtimeproject: java.nio.file.Path,
+    requirements: Vector[RuntimeRequirement]
+  ): Unit = {
+    val version = _development_runtime_version(runtimeproject)
+    val rejected = requirements.filterNot(_.accepts(version))
+    if (rejected.nonEmpty) {
+      val sources = rejected.map(_.source).distinct.sorted.mkString(", ")
+      throw CncfException(s"CNCF runtime $version is not compatible with component requirements: $sources")
+    }
   }
 
   private def _run_dev(

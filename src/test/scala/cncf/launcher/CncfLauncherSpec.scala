@@ -10,7 +10,7 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 13, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -36,6 +36,8 @@ object CncfLauncherSpec {
     spec.runtimeUseWritesExpectedFiles()
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
     spec.installCliWritesDevelopmentCommand()
+    spec.installCliPinsDevelopmentRuntimeWithoutCatalog()
+    spec.installCliRejectsIncompatibleDevelopmentRuntime()
     spec.executeTargetFirstDelegatesToRuntime()
     spec.runtimeCatalogParseAndSelectorResolution()
     spec.runtimeCatalogCommands()
@@ -269,6 +271,20 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the launcher installs a development command")
         Then("the command delegates to cncf target-first command with file parameter expansion")
         installCliWritesDevelopmentCommand()
+      }
+
+      "install cli pins an explicit development runtime without a runtime catalog" in {
+        Given("a development runtime and component requirements with compatible mixed minimum versions")
+        When("the launcher installs a development command")
+        Then("the wrapper pins the runtime directory without selecting from the normal catalog")
+        installCliPinsDevelopmentRuntimeWithoutCatalog()
+      }
+
+      "install cli rejects an explicit incompatible development runtime" in {
+        Given("a development runtime below the target component minimum version")
+        When("the launcher installs a development command")
+        Then("the incompatible runtime is rejected before a wrapper is written")
+        installCliRejectsIncompatibleDevelopmentRuntime()
       }
 
       "target-first execution delegates to runtime" in {
@@ -1232,6 +1248,65 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     script.contains("component_dev_args+=(\"--component-dev-dir\" \"$dir\")") shouldBe true
     script.contains("exec cncf \"${cncf_args[@]}\" \"$fixed_target\" command \"${component_dev_args[@]}\" \"${command_args[@]}\"") shouldBe true
     Files.isExecutable(command) shouldBe true
+  }
+
+  def installCliPinsDevelopmentRuntimeWithoutCatalog(): Unit = _with_temp_paths { paths =>
+    val runtimeproject = paths.cwd.resolve("../cncf-runtime").normalize
+    val georesolver = paths.cwd.resolve("../textus-georesolver").normalize
+    val toolchainrunner = paths.cwd.resolve("../textus-toolchain-runner").normalize
+    _write(runtimeproject.resolve("build.sbt"), "ThisBuild / version := \"0.5.1-SNAPSHOT\"\n")
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.5.1-SNAPSHOT", Vector("0.5.1-SNAPSHOT")))
+    _write(georesolver.resolve("project.yaml"), _project_yaml("0.5.0", Vector("0.5.0")))
+    _write(toolchainrunner.resolve("project.yaml"), _project_yaml("0.5.0", Vector("0.5.0")))
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      FakeInvoker(),
+      environment = Map("CNCF_LAUNCHER_DEV_DELEGATED" -> "1")
+    )
+
+    val code = launcher.run(Vector(
+      "--runtime-dev-dir", runtimeproject.toString,
+      "install-cli",
+      "sanpomap",
+      "--project-dev", ".",
+      "--component-dev-dir", georesolver.toString,
+      "--component-dev-dir", toolchainrunner.toString
+    ))
+
+    _assert_equals(code, 0)
+    val script = Files.readString(paths.home.resolve("bin").resolve("sanpomap-dev"))
+    script.contains("runtime_version=''") shouldBe true
+    script.contains(s"runtime_dev_dir='${runtimeproject.toAbsolutePath.normalize}'") shouldBe true
+    script.contains(s"'${georesolver.toAbsolutePath.normalize}'") shouldBe true
+    script.contains(s"'${toolchainrunner.toAbsolutePath.normalize}'") shouldBe true
+  }
+
+  def installCliRejectsIncompatibleDevelopmentRuntime(): Unit = _with_temp_paths { paths =>
+    val runtimeproject = paths.cwd.resolve("../cncf-runtime").normalize
+    _write(runtimeproject.resolve("build.sbt"), "ThisBuild / version := \"0.5.1-SNAPSHOT\"\n")
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.5.2", Vector("0.5.2")))
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      FakeInvoker(),
+      environment = Map("CNCF_LAUNCHER_DEV_DELEGATED" -> "1")
+    )
+
+    val failure = try {
+      launcher.run(Vector(
+        "--runtime-dev-dir", runtimeproject.toString,
+        "install-cli",
+        "sanpomap",
+        "--project-dev", "."
+      ))
+      None
+    } catch {
+      case e: CncfException => Some(e)
+    }
+
+    failure.map(_.getMessage) shouldBe Some("CNCF runtime 0.5.1-SNAPSHOT is not compatible with component requirements: main-target")
+    Files.exists(paths.home.resolve("bin").resolve("sanpomap-dev")) shouldBe false
   }
 
   def executeTargetFirstDelegatesToRuntime(): Unit = _with_temp_paths { paths =>
