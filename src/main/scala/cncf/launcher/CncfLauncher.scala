@@ -323,9 +323,15 @@ final class CncfLauncher(
         runtimeresolver.resolve(runtimeversion, config, paths)
     }
     val session = _registration_session(command, runtimeversion, config)
+    val shutdownhook = new Thread(
+      () => session.close(),
+      "cncf-textus-admin-registration-shutdown"
+    )
+    Runtime.getRuntime.addShutdownHook(shutdownhook)
     try {
       cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ command.args)
     } finally {
+      scala.util.Try(Runtime.getRuntime.removeShutdownHook(shutdownhook))
       session.close()
     }
   }

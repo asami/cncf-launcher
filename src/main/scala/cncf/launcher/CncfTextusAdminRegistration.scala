@@ -122,10 +122,11 @@ private final class SystemCncfTextusAdminRegistrationReporter extends CncfTextus
     state: String
   ): Unit =
     try {
-      _request(config, report, token, operation, state)
-      ()
+      val status = _request(config, report, token, operation, state)
+      if (status < 200 || status >= 300)
+        _warning(s"$operation request to ${_operation_endpoint(config, operation)} returned HTTP $status")
     } catch {
-      case _: Throwable => _warning(s"$operation request failed")
+      case _: Throwable => _warning(s"$operation connection to ${_operation_endpoint(config, operation)} failed")
     }
 
   private def _request(
@@ -134,19 +135,17 @@ private final class SystemCncfTextusAdminRegistrationReporter extends CncfTextus
     token: String,
     operation: String,
     state: String
-  ): Unit = {
-    val endpoint = URI.create(config.endpoint.stripSuffix("/") + "/" + operation)
+  ): Int = {
+    val endpoint = URI.create(_operation_endpoint(config, operation))
     val timeout = config.timeout.toMillis.min(Int.MaxValue.toLong).toInt
-    val query = _parameters(config, report, state).map { case (key, value) => s"${_encode(key)}=${_encode(value)}" }.mkString("?")
+    val query = _parameters(config, report, state).map { case (key, value) => s"${_encode(key)}=${_encode(value)}" }.mkString("?", "&", "")
     val connection = URI.create(endpoint.toString + query).toURL.openConnection().asInstanceOf[HttpURLConnection]
     try {
       connection.setRequestMethod("GET")
       connection.setConnectTimeout(timeout)
       connection.setReadTimeout(timeout)
       connection.setRequestProperty("Authorization", s"Bearer $token")
-      val status = connection.getResponseCode
-      if (status < 200 || status >= 300)
-        throw CncfException(s"Textus Admin operation returned HTTP $status")
+      connection.getResponseCode
     } finally {
       connection.disconnect()
     }
@@ -168,6 +167,12 @@ private final class SystemCncfTextusAdminRegistrationReporter extends CncfTextus
       "startedAt" -> report.startedAt.toString,
       "launcherState" -> state
     ) ++ report.subsystemName.map("subsystemName" -> _).toVector ++ report.subsystemVersion.map("subsystemVersion" -> _).toVector
+
+  private def _operation_endpoint(
+    config: CncfTextusAdminRegistrationConfig,
+    operation: String
+  ): String =
+    config.endpoint.stripSuffix("/") + "/" + operation
 
   private def _encode(value: String): String =
     URLEncoder.encode(value, StandardCharsets.UTF_8)
