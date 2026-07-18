@@ -19,7 +19,7 @@ final class CncfLauncher(
   processmanager: DevServerProcessManager = DevServerProcessManager.System,
   launcherdevinvoker: LauncherDevInvoker = LauncherDevInvoker.System,
   environment: Map[String, String] = sys.env,
-  registrationreporter: CncfTextusAdminRegistrationReporter = CncfTextusAdminRegistrationReporter.System
+  registrationreporter: CncfTextusControlCenterRegistrationReporter = CncfTextusControlCenterRegistrationReporter.System
 ) {
   def run(args: Vector[String]): Int = {
     val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
@@ -325,7 +325,7 @@ final class CncfLauncher(
     val session = _registration_session(command, runtimeversion, config)
     val shutdownhook = new Thread(
       () => session.close(),
-      "cncf-textus-admin-registration-shutdown"
+      "cncf-textus-control-center-registration-shutdown"
     )
     Runtime.getRuntime.addShutdownHook(shutdownhook)
     try {
@@ -340,17 +340,17 @@ final class CncfLauncher(
     command: CncfCommand.Execute,
     runtimeversion: String,
     config: LauncherConfig
-  ): CncfTextusAdminRegistrationSession =
+  ): CncfTextusControlCenterRegistrationSession =
     if (!command.args.headOption.contains("server")) {
-      CncfTextusAdminRegistrationSession.noop
+      CncfTextusControlCenterRegistrationSession.noop
     } else {
-      config.textusAdminRegistration match {
+      config.textusControlCenterRegistration match {
         case Some(registration) =>
           try {
             val target = _registration_target(command.args)
             registrationreporter.start(
               registration,
-              CncfTextusAdminRegistrationReport(
+              CncfTextusControlCenterRegistrationReport(
                 instanceId = java.util.UUID.randomUUID().toString,
                 target = target._1,
                 subsystemName = target._2,
@@ -362,10 +362,10 @@ final class CncfLauncher(
             )
           } catch {
             case _: Throwable =>
-              Console.err.println("warning: Textus Admin registration setup failed; continuing server startup.")
-              CncfTextusAdminRegistrationSession.noop
+              Console.err.println("warning: Textus Control Center registration setup failed; continuing server startup.")
+              CncfTextusControlCenterRegistrationSession.noop
           }
-        case None => CncfTextusAdminRegistrationSession.noop
+        case None => CncfTextusControlCenterRegistrationSession.noop
       }
     }
 

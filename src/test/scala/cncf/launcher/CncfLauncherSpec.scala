@@ -40,10 +40,11 @@ object CncfLauncherSpec {
     spec.installCliWritesDevelopmentCommand()
     spec.installCliPinsDevelopmentRuntimeWithoutCatalog()
     spec.installCliRejectsIncompatibleDevelopmentRuntime()
-    spec.textusAdminRegistrationLifecycle()
-    spec.textusAdminRegistrationHttpLifecycle()
-    spec.textusAdminRegistrationHttpFailureIsolation()
+    spec.textusControlCenterRegistrationLifecycle()
+    spec.textusControlCenterRegistrationHttpLifecycle()
+    spec.textusControlCenterRegistrationHttpFailureIsolation()
     spec.executeTargetFirstDelegatesToRuntime()
+    spec.serverExecutionDelegatesDefaultPortResolutionToRuntime()
     spec.runtimeCatalogParseAndSelectorResolution()
     spec.runtimeCatalogCommands()
     spec.runtimeCurrentWarnsWhenCachedRecommendedIsStale()
@@ -292,25 +293,25 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         installCliRejectsIncompatibleDevelopmentRuntime()
       }
 
-      "canonical server commands report one Textus Admin lifecycle" in {
-        Given("opt-in Textus Admin registration and current-project and target-first server commands")
+      "canonical server commands report one Textus Control Center lifecycle" in {
+        Given("opt-in Textus Control Center registration and current-project and target-first server commands")
         When("each canonical server invocation completes")
         Then("each invocation is registered and deregistered without including the deprecated dev server")
-        textusAdminRegistrationLifecycle()
+        textusControlCenterRegistrationLifecycle()
       }
 
-      "Textus Admin reporter calls automatic REST operations" in {
-        Given("a reachable automatic Textus Admin REST endpoint")
+      "Textus Control Center reporter calls automatic REST operations" in {
+        Given("a reachable automatic Textus Control Center REST endpoint")
         When("a CNCF registration session starts and closes")
         Then("register and deregister requests carry only the configured bearer credential and safe protocol fields")
-        textusAdminRegistrationHttpLifecycle()
+        textusControlCenterRegistrationHttpLifecycle()
       }
 
-      "Textus Admin authorization rejection is isolated from server lifecycle" in {
+      "Textus Control Center authorization rejection is isolated from server lifecycle" in {
         Given("an automatic REST endpoint that rejects the launcher credential")
         When("a CNCF registration session starts and closes")
         Then("the reporter makes no retry loop and does not propagate the rejection")
-        textusAdminRegistrationHttpFailureIsolation()
+        textusControlCenterRegistrationHttpFailureIsolation()
       }
 
       "target-first execution delegates to runtime" in {
@@ -318,6 +319,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the launcher receives canonical target-first syntax")
         Then("the runtime receives expanded runtime activation arguments")
         executeTargetFirstDelegatesToRuntime()
+      }
+
+      "server execution delegates default port resolution to the runtime" in {
+        serverExecutionDelegatesDefaultPortResolutionToRuntime()
       }
 
       "runtime catalog commands" in {
@@ -745,7 +750,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(invoker.lastArgs, Vector("--help"))
     output.contains("Launcher help:") shouldBe true
     output.contains("cncf launcher version") shouldBe true
+    output.contains("[--runtime <version>] [--runtime-dev-dir <dir>] install-cli") shouldBe true
     output.contains("[--runtime <version>] [--runtime-dev-dir <dir>] <target> command") shouldBe true
+    output.contains("cncf dev is deprecated") shouldBe true
     output.contains("runtime.dev-dir is the configuration equivalent of --runtime-dev-dir") shouldBe true
     output.contains("ancestor conf/cncf/launcher.yaml and .cncf/launcher.yaml") shouldBe true
     _assert_equals(CncfCommandParser.parse(Vector("help")), CncfCommand.RuntimeHelp)
@@ -1335,20 +1342,20 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     Files.exists(paths.home.resolve("bin").resolve("sanpomap-dev")) shouldBe false
   }
 
-  def textusAdminRegistrationLifecycle(): Unit = _with_temp_paths { paths =>
-    Given("a CNCF launcher with opt-in Textus Admin registration")
+  def textusControlCenterRegistrationLifecycle(): Unit = _with_temp_paths { paths =>
+    Given("a CNCF launcher with opt-in Textus Control Center registration")
     _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
-      """textus-admin:
+      """textus-control-center:
         |  registration:
         |    enabled: true
-        |    endpoint: https://admin.example.test/rest/v1/textus-admin/subsystem-inventory
+        |    endpoint: https://admin.example.test/rest/v1/textus-control-center/subsystem-inventory
         |    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
         |    timeout: 2s
         |    heartbeat-interval: 30s
         |    host-label: acceptance
         |    base-url: https://subsystem.example.test
         |""".stripMargin)
-    val reporter = FakeCncfTextusAdminRegistrationReporter()
+    val reporter = FakeCncfTextusControlCenterRegistrationReporter()
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(
       paths,
@@ -1383,7 +1390,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     And("registration setup failure does not prevent canonical server startup")
     val outageinvoker = FakeInvoker()
-    val outage = new CncfTextusAdminRegistrationOutageReporter
+    val outage = new CncfTextusControlCenterRegistrationOutageReporter
     val outagelauncher = new CncfLauncher(
       paths,
       FakeResolver(),
@@ -1396,8 +1403,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     outageinvoker.lastArgs.head shouldBe "server"
   }
 
-  def textusAdminRegistrationHttpLifecycle(): Unit = {
-    Given("a reachable Textus Admin automatic REST endpoint")
+  def textusControlCenterRegistrationHttpLifecycle(): Unit = {
+    Given("a reachable Textus Control Center automatic REST endpoint")
     val requests = scala.collection.mutable.ArrayBuffer.empty[(String, String)]
     val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/", new HttpHandler {
@@ -1409,15 +1416,15 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     })
     server.start()
     try {
-      val config = CncfTextusAdminRegistrationConfig(
-        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-admin/subsystem-inventory",
+      val config = CncfTextusControlCenterRegistrationConfig(
+        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-control-center/subsystem-inventory",
         tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
         timeout = java.time.Duration.ofSeconds(1),
         heartbeatInterval = java.time.Duration.ofSeconds(30),
         hostLabel = "acceptance",
         baseUrl = "https://subsystem.example.test"
       )
-      val report = CncfTextusAdminRegistrationReport(
+      val report = CncfTextusControlCenterRegistrationReport(
         instanceId = "cncf-registration-http-spec",
         target = "textus-registration",
         subsystemName = Some("textus-registration"),
@@ -1427,22 +1434,56 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       )
 
       When("the reporter starts and closes one server registration session")
-      val session = CncfTextusAdminRegistrationReporter.System.start(config, report, Some("test-token"))
+      val session = CncfTextusControlCenterRegistrationReporter.System.start(config, report, Some("test-token"))
+      session.close()
       session.close()
 
-      Then("it sends register and deregister automatic REST operations with the configured bearer credential")
+      Then("it sends one register and one deregister operation with the configured bearer credential")
+      _assert_equals(requests.size, 2)
       requests.map(_._1).exists(_.contains("register-subsystem")) shouldBe true
       requests.map(_._1).exists(_.contains("deregister-subsystem")) shouldBe true
       requests.forall(_._2 == "Bearer test-token") shouldBe true
       requests.forall { case (path, _) => path.contains("instanceId=cncf-registration-http-spec") } shouldBe true
       requests.forall { case (path, _) => path.contains("?protocolVersion=1&instanceId=") } shouldBe true
+
+      Given("registration without an explicit public base URL")
+      requests.clear()
+      val propertykey = "textus.server.bound-base-url"
+      sys.props.remove(propertykey)
+
+      When("CNCF publishes the endpoint after the server has bound")
+      val dynamicsession = CncfTextusControlCenterRegistrationReporter.System.start(config.copy(baseUrl = ""), report, Some("test-token"))
+      sys.props.update(propertykey, "http://127.0.0.1:38000")
+      val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2)
+      while (requests.size < 1 && System.nanoTime() < deadline)
+        Thread.sleep(10L)
+      dynamicsession.close()
+      sys.props.remove(propertykey)
+
+      Then("registration uses the bound endpoint rather than a guessed default port")
+      _assert_equals(requests.size, 2)
+      requests.forall(_._1.contains("baseUrl=http%3A%2F%2F127.0.0.1%3A38000")) shouldBe true
+
+      And("the previous canonical textus-admin key remains readable during migration")
+      val legacyvalues = LauncherConfigParser.parse(
+        Path.of("legacy-launcher.yaml"),
+        """textus-admin:
+          |  registration:
+          |    enabled: true
+          |    endpoint: https://admin.example.test/inventory
+          |    token-env: TOKEN
+          |    host-label: legacy
+          |""".stripMargin
+      )
+      CncfTextusControlCenterRegistrationConfig.fromParsed(legacyvalues).map(_.hostLabel) shouldBe Some("legacy")
     } finally {
+      sys.props.remove("textus.server.bound-base-url")
       server.stop(0)
     }
   }
 
-  def textusAdminRegistrationHttpFailureIsolation(): Unit = {
-    Given("a Textus Admin endpoint that rejects a launcher registration")
+  def textusControlCenterRegistrationHttpFailureIsolation(): Unit = {
+    Given("a Textus Control Center endpoint that rejects a launcher registration")
     val requests = scala.collection.mutable.ArrayBuffer.empty[String]
     val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/", new HttpHandler {
@@ -1454,15 +1495,15 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     })
     server.start()
     try {
-      val config = CncfTextusAdminRegistrationConfig(
-        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-admin/subsystem-inventory",
+      val config = CncfTextusControlCenterRegistrationConfig(
+        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-control-center/subsystem-inventory",
         tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
         timeout = java.time.Duration.ofSeconds(1),
         heartbeatInterval = java.time.Duration.ofSeconds(30),
         hostLabel = "acceptance",
         baseUrl = "https://subsystem.example.test"
       )
-      val report = CncfTextusAdminRegistrationReport(
+      val report = CncfTextusControlCenterRegistrationReport(
         instanceId = "cncf-registration-http-failure-spec",
         target = "textus-registration",
         subsystemName = Some("textus-registration"),
@@ -1472,7 +1513,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       )
 
       When("the reporter receives authorization rejection for registration and deregistration")
-      val session = CncfTextusAdminRegistrationReporter.System.start(config, report, Some("rejected-token"))
+      val session = CncfTextusControlCenterRegistrationReporter.System.start(config, report, Some("rejected-token"))
       session.close()
 
       Then("it performs exactly one bounded request for each lifecycle transition without a retry loop")
@@ -1495,6 +1536,31 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(code, 0)
     _assert_equals(resolver.resolvedClasspaths, Vector("0.4.12"))
     _assert_equals(invoker.lastArgs, Vector("command", "--textus.component=textus-sanpomap", "--textus.component.version=1", "validate-presentation", "--format", "yaml"))
+  }
+
+  def serverExecutionDelegatesDefaultPortResolutionToRuntime(): Unit = _with_temp_paths { paths =>
+    Given("target-first CAR and SAR server invocations without an explicit server port")
+    _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"), "runtime:\n  version: 0.4.12\n")
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    When("the launcher delegates the CAR invocation to CNCF")
+    val carcode = launcher.run(Vector("textus-sanpomap:1", "server"))
+
+    Then("CAR activation is forwarded without a launcher-owned port override")
+    _assert_equals(carcode, 0)
+    _assert_equals(invoker.lastArgs, Vector("server", "--textus.component=textus-sanpomap", "--textus.component.version=1"))
+    invoker.lastArgs.exists(_.startsWith("--textus.server.port=")) shouldBe false
+    invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")) shouldBe false
+
+    When("the launcher delegates the SAR invocation to CNCF")
+    val sarcode = launcher.run(Vector("textus-platform.sar", "server"))
+
+    Then("SAR activation is forwarded without a launcher-owned port override")
+    _assert_equals(sarcode, 0)
+    _assert_equals(invoker.lastArgs, Vector("server", "--subsystem-file=textus-platform.sar"))
+    invoker.lastArgs.exists(_.startsWith("--textus.server.port=")) shouldBe false
+    invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")) shouldBe false
   }
 
   def runtimeCatalogParseAndSelectorResolution(): Unit = {
@@ -1687,10 +1753,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
          |  port: 19600
          |  componentDevDirs:
          |    - ../account
-         |textus-admin:
+         |textus-control-center:
          |  registration:
          |    enabled: true
-         |    endpoint: https://admin.example.test/rest/v1/textus-admin/subsystem-inventory
+         |    endpoint: https://admin.example.test/rest/v1/textus-control-center/subsystem-inventory
          |    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
          |    host-label: acceptance
          |    base-url: https://subsystem.example.test
@@ -1698,7 +1764,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     Files.createDirectories(paths.cwd.getParent.resolve("account"))
     _write(paths.cwd.getParent.resolve("account").resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     val invoker = FakeInvoker()
-    val reporter = FakeCncfTextusAdminRegistrationReporter()
+    val reporter = FakeCncfTextusControlCenterRegistrationReporter()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker, registrationreporter = reporter)
     launcher.run(Vector("dev", "server"))
     _assert_equals(invoker.lastArgs.take(4), Vector(
@@ -2124,6 +2190,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     help.contains("Target-first execution adds target activation") shouldBe true
     help.contains("Low-level dev commands:") shouldBe false
     help.contains("cncf dev server") shouldBe false
+    help.contains("cncf dev is deprecated") shouldBe true
     help.contains("dev-server.pid") shouldBe false
     help.contains("--component-dev-dir <dir> is a dependency component local override") shouldBe true
     help.contains("cozyPublishLocalCar") shouldBe true
@@ -2640,33 +2707,33 @@ object FakeInvoker {
   def apply(): FakeInvoker = new FakeInvoker()
 }
 
-final class FakeCncfTextusAdminRegistrationReporter extends CncfTextusAdminRegistrationReporter {
-  var starts: Vector[(CncfTextusAdminRegistrationReport, Option[String])] = Vector.empty
+final class FakeCncfTextusControlCenterRegistrationReporter extends CncfTextusControlCenterRegistrationReporter {
+  var starts: Vector[(CncfTextusControlCenterRegistrationReport, Option[String])] = Vector.empty
   var closes: Int = 0
 
   def start(
-    config: CncfTextusAdminRegistrationConfig,
-    report: CncfTextusAdminRegistrationReport,
+    config: CncfTextusControlCenterRegistrationConfig,
+    report: CncfTextusControlCenterRegistrationReport,
     token: Option[String]
-  ): CncfTextusAdminRegistrationSession = {
+  ): CncfTextusControlCenterRegistrationSession = {
     starts :+= report -> token
-    new CncfTextusAdminRegistrationSession {
+    new CncfTextusControlCenterRegistrationSession {
       def close(): Unit = closes += 1
     }
   }
 }
 
-object FakeCncfTextusAdminRegistrationReporter {
-  def apply(): FakeCncfTextusAdminRegistrationReporter = new FakeCncfTextusAdminRegistrationReporter()
+object FakeCncfTextusControlCenterRegistrationReporter {
+  def apply(): FakeCncfTextusControlCenterRegistrationReporter = new FakeCncfTextusControlCenterRegistrationReporter()
 }
 
-final class CncfTextusAdminRegistrationOutageReporter extends CncfTextusAdminRegistrationReporter {
+final class CncfTextusControlCenterRegistrationOutageReporter extends CncfTextusControlCenterRegistrationReporter {
   def start(
-    config: CncfTextusAdminRegistrationConfig,
-    report: CncfTextusAdminRegistrationReport,
+    config: CncfTextusControlCenterRegistrationConfig,
+    report: CncfTextusControlCenterRegistrationReport,
     token: Option[String]
-  ): CncfTextusAdminRegistrationSession =
-    throw CncfException("simulated Textus Admin outage")
+  ): CncfTextusControlCenterRegistrationSession =
+    throw CncfException("simulated Textus Control Center outage")
 }
 
 final class FakeLauncherDevInvoker extends LauncherDevInvoker {

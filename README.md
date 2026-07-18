@@ -16,15 +16,20 @@ cncf runtime use recommended
 cncf runtime use latest
 cncf runtime use newest
 
-cncf dev classpath
-cncf dev check
-cncf dev server
-cncf dev server --runtime-dev-dir <cncf-runtime-checkout>
-cncf dev server --project-dev ../textus-knowledge-editor
-cncf dev server --name textus-knowledge-editor:0.1.0-SNAPSHOT
-cncf dev server --car-file target/textus-knowledge-editor-0.1.0-SNAPSHOT.car
-cncf dev server-emulation my-component.my-service.my-operation
+cncf /Users/asami/src/dev2026/textus-sanpomap command validate-presentation --presentationDsl presentation-dsl.yaml
+cncf . server
+cncf textus-sanpomap:0.2.0-SNAPSHOT client
 ```
+
+`cncf dev ...` is deprecated. Use target-first `command`, `server`, and
+`client` syntax. `cncf dev` remains only as a compatibility alias and is not
+the supported component-development entry point.
+
+For target-first `server` execution, the launcher forwards artifact activation
+without assigning a port. CNCF runtime reads `textus.server.default-port` from
+the CAR/SAR descriptor, coordinates the machine-local assignment, and selects
+an additional-instance port when necessary. `textus.server.port` remains an
+explicit operator override and may be supplied as a runtime property.
 
 ## Development CLI Installation
 
@@ -34,8 +39,9 @@ component developers. General users should use `textus install-cli`, which
 delegates to packaged CAR/SAR artifacts.
 
 ```bash
-cncf install-cli sanpomap \
+cncf --runtime-dev-dir /Users/asami/src/dev2025/cloud-native-component-framework install-cli sanpomap \
   --project-dev /Users/asami/src/dev2026/textus-sanpomap \
+  --component-dev-dir /Users/asami/src/dev2026/textus-georesolver \
   --overwrite
 
 sanpomap-dev validate-presentation --presentationDsl xxx.yaml --format yaml
@@ -48,6 +54,13 @@ the operation selector and operation parameters. The target is resolved to an ab
 project path at install time. `~/bin` is the default install
 directory; use `--bin-dir <dir>` to choose another location.
 
+When `--runtime-dev-dir` is supplied, `install-cli` pins that absolute runtime
+directory in the wrapper. The launcher reads the runtime version from its
+`build.sbt` and checks it against the main and development dependency component
+requirements. This path does not select a version from the runtime catalog.
+Without `--runtime-dev-dir`, `install-cli` resolves and pins the selected
+runtime version.
+
 Leaf-only operation selectors such as `validate-presentation` depend on CNCF
 runtime selector resolution. If the pinned runtime requires a full selector,
 use `sanpomap-dev sanpomap.presentation.validate-presentation ...` or install a
@@ -57,13 +70,13 @@ If a project still needs a selector prefix in the generated command, pass
 `--operation-prefix <component.service>`. Otherwise the selector is passed
 unchanged and resolution is left to the CNCF runtime.
 
-`cncf dev classpath` writes:
+The deprecated `cncf dev classpath` command writes:
 
 ```text
 target/cncf.d/runtime-classpath.txt
 ```
 
-`cncf dev server` invokes `org.goldenport.cncf.CncfMain` in the same JVM. It
+The deprecated `cncf dev server` invokes `org.goldenport.cncf.CncfMain` in the same JVM. It
 defaults to `--project-dev .`, meaning the current development directory is
 the main target. Use `--project-dev <dir>` to select another development
 project. The project-dev target is not resolved from CAR/SAR repositories in
@@ -75,7 +88,7 @@ repository/local artifact, `--car-file <file>` for a direct CAR/SAR file, or
 directory. Target options are mutually exclusive.
 
 The main target uses `target/cncf.d/runtime-classpath.txt`. If the file is
-missing or empty, `cncf dev server`, `cncf dev client`, `cncf dev command`, and
+missing or empty, deprecated `cncf dev server`, `cncf dev client`, `cncf dev command`, and
 `cncf dev server-emulation` prepare it automatically from `Runtime /
 fullClasspath`. Use `cncf dev classpath --project-dev <dir>` to prepare it
 manually.
@@ -93,11 +106,11 @@ launcher for repository-based application startup.
 
 Use `--runtime-dev-dir <dir>` or `runtime.dev-dir` to run against a local CNCF
 runtime checkout instead of a published runtime artifact. This applies to
-target-first execute commands and `cncf dev ...` commands. It is for CNCF core
+target-first commands and development CLI installation. It is for CNCF core
 development; component source directories still use `--component-dev-dir`.
 
 Runtime arguments placed before the operation selector are forwarded before
-`server`, `client`, or `command`, for example `cncf dev command --repository-dir
+`server`, `client`, or `command`, for example `cncf . command --repository-dir
 repository.d minimal.main.hello`. Use `--no-project-classpath` when invoking
 packaged CAR/SAR artifacts without the current project classpath.
 
@@ -117,13 +130,13 @@ Ancestor discovery lets a repository such as `cncf-samples` keep one root
 still override the inherited settings with its own `conf/cncf/launcher.yaml` or
 `.cncf/launcher.yaml`.
 
-For `cncf dev ... --project-dev <dir>`, the project launcher config is
+For deprecated `cncf dev ... --project-dev <dir>`, the project launcher config is
 `<dir>/conf/cncf/launcher.yaml`, with `<dir>/.cncf/launcher.yaml` as a local
 override. Use `--config <file>` for an additional launcher config file, for
 example:
 
 ```bash
-cncf --config etc/launcher/debug.yaml dev server
+cncf --config etc/launcher/debug.yaml . server
 ```
 
 Launcher config is intentionally lightweight. It supports `yaml` / `yml`,
@@ -185,30 +198,30 @@ development:
 
 Section `enabled` values take precedence over `development.enabled`.
 
-### Optional Textus Admin subsystem registration
+### Optional Textus Control Center subsystem registration
 
-Textus Admin can list Subsystem processes started by canonical CNCF server
+Textus Control Center can list Subsystem processes started by canonical CNCF server
 commands. Registration is opt-in and applies only to `cncf server` and
 `cncf <target> server`; deprecated `cncf dev server` is not a registration
 source.
 
 ```yaml
-textus-admin:
+textus-control-center:
   registration:
     enabled: true
-    endpoint: https://admin.example.test/rest/v1/textus-admin/subsystem-inventory
-    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
+    endpoint: https://admin.example.test/rest/v1/textus-control-center/subsystem-inventory
+    token-env: TEXTUS_CONTROL_CENTER_REGISTRATION_TOKEN
     timeout: 2s
     heartbeat-interval: 30s
     host-label: development-a
     base-url: https://subsystem.example.test
 ```
 
-`endpoint` is the Textus Admin subsystem-inventory operation base URL. The
+`endpoint` is the Textus Control Center subsystem-inventory operation base URL. The
 launcher sends register, heartbeat, and deregister requests with the bearer
 credential named by `token-env`; it never writes or prints the credential
 value. Requests use the configured bounded timeout. Missing credentials,
-authorization rejection, and Textus Admin outages emit a sanitized warning but
+authorization rejection, and Textus Control Center outages emit a sanitized warning but
 do not prevent the target server from starting.
 
 Higher-precedence project launcher configuration may override the global
@@ -230,13 +243,15 @@ and passes the original command line through. The delegated launcher is marked
 internally so it does not recursively delegate again.
 The launcher checkout must have a current
 `target/cncf.d/runtime-classpath.txt` containing `cncf.launcher.CncfLauncherMain`;
-run `sbt --batch compile` and `cncf dev classpath` in the launcher checkout
+run `sbt --batch compile` and the deprecated `cncf dev classpath` maintenance
+command in the launcher checkout
 after changing launcher sources. Stale classpath files are rejected before the
 delegated process is spawned.
 
 `runtime.dev-dir` is different: it selects the CNCF runtime checkout used by
-target-first execute commands and `cncf dev ...` commands after the launcher
-has started.
+target-first commands and installed development commands. It also applies to
+the deprecated `cncf dev ...` compatibility surface after the launcher has
+started.
 
 ## CNCF Runtime Configuration
 
@@ -270,7 +285,7 @@ locally published development artifacts. Snapshot components are local-only by
 default; if a snapshot is missing, publish it locally instead of expecting
 public/cache lookup.
 
-`component.d` and `repository.d` are not used implicitly by `cncf dev server`.
+`component.d` and `repository.d` are not used implicitly by deprecated `cncf dev server`.
 Configure repositories explicitly or publish dependency components to
 `~/.cncf/local`.
 
@@ -306,7 +321,7 @@ Runtime selector terms are:
 - `newest`: newest enabled runtime across all catalog channels.
 
 When a development project or local dependency project declares `runtime.cncf`
-compatibility, `cncf dev` uses `current-compatible` selection by default. Use
+compatibility, deprecated `cncf dev` uses `current-compatible` selection by default. Use
 `--runtime-selection=tested-latest`, `--runtime-selection=latest`, or
 `--runtime-selection=newest` to choose a different compatible-runtime policy.
 

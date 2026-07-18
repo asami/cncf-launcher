@@ -3,7 +3,7 @@ package cncf.launcher
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 13, 2026
+ * @version Jul. 18, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -604,7 +604,7 @@ object CncfCommandParser {
       |  cncf --version
       |  cncf version
       |  cncf launcher version
-      |  cncf install-cli <command-base-name> [--project-dev <dir>] [--component-dev-dir <dir>...] [--operation-prefix <component.service>] [--file-param <name>...] [--bin-dir <dir>] [--overwrite]
+      |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] install-cli <command-base-name> [--project-dev <dir>] [--component-dev-dir <dir>...] [--operation-prefix <component.service>] [--file-param <name>...] [--bin-dir <dir>] [--overwrite]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> command <operation> [args...]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> server [args...]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> client [args...]
@@ -632,7 +632,9 @@ object CncfCommandParser {
       |  Without --runtime, project/component runtime.cncf requirements use current-compatible selection by default.
       |  --runtime-selection=current-compatible|tested-latest|latest-compatible|newest-compatible selects the compatible runtime preference.
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
-      |  --runtime-dev-dir <dir> uses a local CNCF runtime checkout for execute and dev commands.
+      |  --runtime-dev-dir <dir> uses a local CNCF runtime checkout for execute and installed development commands.
+      |  install-cli pins an explicit runtime development directory and validates its version against component runtime requirements without catalog selection.
+      |  cncf dev is deprecated; use target-first command, server, or client syntax, or install-cli for a fixed development command.
       |  Config runtime.dev-dir is the configuration equivalent of --runtime-dev-dir.
       |  CNCF_VERSION/CNCF_RUNTIME_VERSION override the configured runtime version.
       |  CNCF_RUNTIME_DEV_DIR directly selects a local CNCF runtime checkout.

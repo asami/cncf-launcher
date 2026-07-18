@@ -21,8 +21,8 @@ final case class LauncherConfig(
   runtimeCatalogUrl: Option[String] = None,
   runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
   runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
-  textusAdminRegistration: Option[CncfTextusAdminRegistrationConfig] = None,
-  textusAdminRegistrationEnabled: Option[Boolean] = None,
+  textusControlCenterRegistration: Option[CncfTextusControlCenterRegistrationConfig] = None,
+  textusControlCenterRegistrationEnabled: Option[Boolean] = None,
   devExecutionProfile: Option[CncfCommand.DevExecutionProfile] = None,
   devProjectDev: Option[String] = None,
   devPort: Option[String] = None,
@@ -52,11 +52,11 @@ final case class LauncherConfig(
       runtimeCatalogUrl = higher.runtimeCatalogUrl.orElse(runtimeCatalogUrl),
       runtimeSelectionPolicy = higher.runtimeSelectionPolicy.orElse(runtimeSelectionPolicy),
       runtimeNoCompatiblePolicy = higher.runtimeNoCompatiblePolicy.orElse(runtimeNoCompatiblePolicy),
-      textusAdminRegistration = higher.textusAdminRegistrationEnabled match {
+      textusControlCenterRegistration = higher.textusControlCenterRegistrationEnabled match {
         case Some(false) => None
-        case _ => higher.textusAdminRegistration.orElse(textusAdminRegistration)
+        case _ => higher.textusControlCenterRegistration.orElse(textusControlCenterRegistration)
       },
-      textusAdminRegistrationEnabled = higher.textusAdminRegistrationEnabled.orElse(textusAdminRegistrationEnabled),
+      textusControlCenterRegistrationEnabled = higher.textusControlCenterRegistrationEnabled.orElse(textusControlCenterRegistrationEnabled),
       devExecutionProfile = higher.devExecutionProfile.orElse(devExecutionProfile),
       devProjectDev = higher.devProjectDev.orElse(devProjectDev),
       devPort = higher.devPort.orElse(devPort),
@@ -266,8 +266,8 @@ object LauncherConfig {
         map(RuntimeSelectionPolicy.parse),
       runtimeNoCompatiblePolicy = _first_("runtime.cncf.no-compatible-policy", "runtime.cncf.no_compatible_policy", "cncf.runtime.cncf.no-compatible-policy", "cncf.runtime.cncf.no_compatible_policy", "runtime.cncf.noCompatiblePolicy", "cncf.runtime.cncf.noCompatiblePolicy").
         map(RuntimeNoCompatiblePolicy.parse),
-      textusAdminRegistration = CncfTextusAdminRegistrationConfig.fromParsed(values),
-      textusAdminRegistrationEnabled = CncfTextusAdminRegistrationConfig.enabled(values),
+      textusControlCenterRegistration = CncfTextusControlCenterRegistrationConfig.fromParsed(values),
+      textusControlCenterRegistrationEnabled = CncfTextusControlCenterRegistrationConfig.enabled(values),
       devExecutionProfile = _first_("dev.profile", "dev.execution-profile", "dev.execution_profile", "cncf.dev.profile", "cncf.dev.execution-profile", "cncf.dev.execution_profile", "dev.executionProfile", "cncf.dev.executionProfile").
         map(CncfCommand.DevExecutionProfile.parse),
       devProjectDev = _first_(
