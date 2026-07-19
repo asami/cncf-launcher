@@ -346,7 +346,10 @@ final class CncfLauncher(
     } else {
       val registration = config.textusControlCenterRegistration.map(value => value -> environment.get(value.tokenEnv)).orElse {
         Option.when(!config.textusControlCenterRegistrationEnabled.contains(false))(
-          CncfTextusControlCenterStandaloneLocator.resolve(paths).map(value => value.config -> Some(value.token))
+          CncfTextusControlCenterStandaloneLocator.resolve(paths).map { value =>
+            val configuration = _standalone_registration_base_url(command).fold(value.config)(baseurl => value.config.copy(baseUrl = baseurl))
+            configuration -> Some(value.token)
+          }
         ).flatten
       }
       registration match {
@@ -384,6 +387,14 @@ final class CncfLauncher(
     val target = subsystemname.orElse(_option_("--component-dev-dir=").filter(_ != ".").map(_file_name_)).orElse(_option_("--component-file=").map(_file_name_)).orElse(_option_("--subsystem-file=").map(_file_name_)).getOrElse("current-project")
     (target, subsystemname, _option_("--textus.component.version="))
   }
+
+  private def _standalone_registration_base_url(command: CncfCommand.Execute): Option[String] =
+    command.args.collectFirst {
+      case value if value.startsWith("--textus.server.port=") => value.stripPrefix("--textus.server.port=")
+      case value if value.startsWith("--cncf.server.port=") => value.stripPrefix("--cncf.server.port=")
+    }.flatMap { value =>
+      scala.util.Try(value.toInt).toOption.filter(port => port >= 1 && port <= 65535).map(port => s"http://127.0.0.1:$port")
+    }
 
   private def _run_install_cli(
     command: CncfCommand.InstallCli,

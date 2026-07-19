@@ -1377,7 +1377,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     invoker.lastArgs.head shouldBe "server"
 
     When("the current-project canonical server command completes")
-    val currentprojectcode = launcher.run(Vector("server"))
+    val currentprojectcode = launcher.run(Vector("server", "--textus.server.port=18014"))
 
     Then("it reports a distinct current-project invocation through the same lifecycle")
     _assert_equals(currentprojectcode, 0)
@@ -1423,7 +1423,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker, registrationreporter = reporter)
 
     When("both canonical CNCF server forms run without inline registration configuration")
-    val currentprojectcode = launcher.run(Vector("server"))
+    val currentprojectcode = launcher.run(Vector("server", "--textus.server.port=18014"))
     val targetfirstcode = launcher.run(Vector("textus-registration:0.1.0", "server"))
 
     Then("the locator credential is used for both lifecycle sessions")
@@ -1431,6 +1431,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(targetfirstcode, 0)
     _assert_equals(reporter.starts.size, 2)
     reporter.starts.map(_._2) shouldBe Vector(Some("standalone-token"), Some("standalone-token"))
+    reporter.configs.head.baseUrl shouldBe "http://127.0.0.1:18014"
     _assert_equals(reporter.closes, 2)
 
     When("the shared credential is no longer owner-readable and owner-writable only")
@@ -2764,6 +2765,7 @@ object FakeInvoker {
 
 final class FakeCncfTextusControlCenterRegistrationReporter extends CncfTextusControlCenterRegistrationReporter {
   var starts: Vector[(CncfTextusControlCenterRegistrationReport, Option[String])] = Vector.empty
+  var configs: Vector[CncfTextusControlCenterRegistrationConfig] = Vector.empty
   var closes: Int = 0
 
   def start(
@@ -2772,6 +2774,7 @@ final class FakeCncfTextusControlCenterRegistrationReporter extends CncfTextusCo
     token: Option[String]
   ): CncfTextusControlCenterRegistrationSession = {
     starts :+= report -> token
+    configs :+= config
     new CncfTextusControlCenterRegistrationSession {
       def close(): Unit = closes += 1
     }
