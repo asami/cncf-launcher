@@ -1353,6 +1353,11 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         |    host-label: acceptance
         |    base-url: https://subsystem.example.test
         |""".stripMargin)
+    _write(paths.cwd.resolve("project.yaml"),
+      """project:
+        |  component:
+        |    name: current-component
+        |""".stripMargin)
     val reporter = FakeCncfTextusControlCenterRegistrationReporter()
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(
@@ -1371,6 +1376,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(reporter.starts.size, 1)
     _assert_equals(reporter.closes, 1)
     _assert_equals(reporter.starts.head._1.target, "textus-registration")
+    _assert_equals(reporter.starts.head._1.executionMode, "repository")
+    _assert_equals(reporter.starts.head._1.developmentDirectory, None)
     _assert_equals(reporter.starts.head._1.subsystemName, Some("textus-registration"))
     _assert_equals(reporter.starts.head._1.subsystemVersion, Some("0.1.0"))
     _assert_equals(reporter.starts.head._2, Some("secret-token"))
@@ -1383,8 +1390,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(currentprojectcode, 0)
     _assert_equals(reporter.starts.size, 2)
     _assert_equals(reporter.closes, 2)
-    _assert_equals(reporter.starts(1)._1.target, "work")
-    _assert_equals(reporter.starts(1)._1.subsystemName, Some("work"))
+    _assert_equals(reporter.starts(1)._1.target, "current-component")
+    _assert_equals(reporter.starts(1)._1.executionMode, "development")
+    _assert_equals(reporter.starts(1)._1.developmentDirectory, Some(paths.cwd.toAbsolutePath.normalize.toString))
+    _assert_equals(reporter.starts(1)._1.subsystemName, Some("current-component"))
 
     And("registration setup failure does not prevent canonical server startup")
     val outageinvoker = FakeInvoker()
@@ -1480,6 +1489,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       val report = CncfTextusControlCenterRegistrationReport(
         instanceId = "cncf-registration-http-spec",
         target = "textus-registration",
+        executionMode = "repository",
+        developmentDirectory = None,
         subsystemName = Some("textus-registration"),
         subsystemVersion = Some("0.1.0"),
         runtimeVersion = "0.5.0",
@@ -1562,6 +1573,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       val report = CncfTextusControlCenterRegistrationReport(
         instanceId = "cncf-registration-http-failure-spec",
         target = "textus-registration",
+        executionMode = "repository",
+        developmentDirectory = None,
         subsystemName = Some("textus-registration"),
         subsystemVersion = Some("0.1.0"),
         runtimeVersion = "0.5.0",

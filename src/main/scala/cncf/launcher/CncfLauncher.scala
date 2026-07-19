@@ -360,9 +360,11 @@ final class CncfLauncher(
               configuration,
               CncfTextusControlCenterRegistrationReport(
                 instanceId = java.util.UUID.randomUUID().toString,
-                target = target._1,
-                subsystemName = target._2,
-                subsystemVersion = target._3,
+                target = target.name,
+                executionMode = target.executionMode,
+                developmentDirectory = target.developmentDirectory,
+                subsystemName = target.subsystemName,
+                subsystemVersion = target.subsystemVersion,
                 runtimeVersion = runtimeversion,
                 startedAt = java.time.Instant.now()
               ),
@@ -377,19 +379,54 @@ final class CncfLauncher(
       }
     }
 
-  private def _registration_target(args: Vector[String]): (String, Option[String], Option[String]) = {
+  private final case class RegistrationTarget(
+    name: String,
+    executionMode: String,
+    developmentDirectory: Option[String],
+    subsystemName: Option[String],
+    subsystemVersion: Option[String]
+  )
+
+  private def _registration_target(args: Vector[String]): RegistrationTarget = {
     def _option_(name: String): Option[String] =
       args.collectFirst { case value if value.startsWith(name) => value.stripPrefix(name) }.filter(_.nonEmpty)
     def _file_name_(value: String): String =
       Option(java.nio.file.Path.of(value).getFileName).map(_.toString).filter(_.nonEmpty).getOrElse(value)
 
     val subsystemname = _option_("--textus.component=")
-    val developmentname = _option_("--component-dev-dir=").map { value =>
-      if (value == ".") _file_name_(paths.cwd.toString)
-      else _file_name_(value)
+    val developmentdirectory = _option_("--component-dev-dir=").map(_development_directory)
+    developmentdirectory match {
+      case Some(directory) =>
+        val name = _project_component_name(directory).getOrElse(_file_name_(directory.toString))
+        RegistrationTarget(name, "development", Some(directory.toString), Some(name), None)
+      case None => subsystemname match {
+        case Some(name) =>
+          RegistrationTarget(name, "repository", None, Some(name), _option_("--textus.component.version="))
+        case None => _option_("--component-file=").orElse(_option_("--subsystem-file=")) match {
+          case Some(file) =>
+            val name = _file_name_(file)
+            RegistrationTarget(name, "artifact-file", None, Some(name), None)
+          case None =>
+            val directory = _development_directory(".")
+            val name = _project_component_name(directory).getOrElse(_file_name_(directory.toString))
+            RegistrationTarget(name, "development", Some(directory.toString), Some(name), None)
+        }
+      }
     }
-    val target = subsystemname.orElse(developmentname).orElse(_option_("--component-file=").map(_file_name_)).orElse(_option_("--subsystem-file=").map(_file_name_)).getOrElse(_file_name_(paths.cwd.toString))
-    (target, subsystemname.orElse(developmentname), _option_("--textus.component.version="))
+  }
+
+  private def _development_directory(value: String): java.nio.file.Path =
+    paths.cwd.resolve(value).normalize.toAbsolutePath.normalize
+
+  private def _project_component_name(directory: java.nio.file.Path): Option[String] = {
+    val project = directory.resolve("project.yaml")
+    scala.util.Try {
+      LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
+        .get("project.component.name")
+        .flatMap(_.headOption)
+        .map(_.trim)
+        .filter(_.nonEmpty)
+    }.toOption.flatten
   }
 
   private def _standalone_registration_base_url(command: CncfCommand.Execute): Option[String] =

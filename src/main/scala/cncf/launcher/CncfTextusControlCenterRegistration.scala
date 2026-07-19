@@ -8,7 +8,7 @@ import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 19, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfTextusControlCenterRegistrationConfig(
@@ -64,6 +64,8 @@ object CncfTextusControlCenterRegistrationConfig {
 final case class CncfTextusControlCenterRegistrationReport(
   instanceId: String,
   target: String,
+  executionMode: String,
+  developmentDirectory: Option[String],
   subsystemName: Option[String],
   subsystemVersion: Option[String],
   runtimeVersion: String,
@@ -202,12 +204,13 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
       "instanceId" -> report.instanceId,
       "launcherKind" -> "cncf",
       "target" -> report.target,
+      "executionMode" -> report.executionMode,
       "runtimeVersion" -> report.runtimeVersion,
       "baseUrl" -> config.baseUrl,
       "hostLabel" -> config.hostLabel,
       "startedAt" -> report.startedAt.toString,
       "launcherState" -> state
-    ) ++ report.subsystemName.map("subsystemName" -> _).toVector ++ report.subsystemVersion.map("subsystemVersion" -> _).toVector
+    ) ++ report.developmentDirectory.map("developmentDirectory" -> _).toVector ++ report.subsystemName.map("subsystemName" -> _).toVector ++ report.subsystemVersion.map("subsystemVersion" -> _).toVector
 
   private def _operation_endpoint(
     config: CncfTextusControlCenterRegistrationConfig,
