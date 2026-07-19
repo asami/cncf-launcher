@@ -384,8 +384,12 @@ final class CncfLauncher(
       Option(java.nio.file.Path.of(value).getFileName).map(_.toString).filter(_.nonEmpty).getOrElse(value)
 
     val subsystemname = _option_("--textus.component=")
-    val target = subsystemname.orElse(_option_("--component-dev-dir=").filter(_ != ".").map(_file_name_)).orElse(_option_("--component-file=").map(_file_name_)).orElse(_option_("--subsystem-file=").map(_file_name_)).getOrElse("current-project")
-    (target, subsystemname, _option_("--textus.component.version="))
+    val developmentname = _option_("--component-dev-dir=").map { value =>
+      if (value == ".") _file_name_(paths.cwd.toString)
+      else _file_name_(value)
+    }
+    val target = subsystemname.orElse(developmentname).orElse(_option_("--component-file=").map(_file_name_)).orElse(_option_("--subsystem-file=").map(_file_name_)).getOrElse(_file_name_(paths.cwd.toString))
+    (target, subsystemname.orElse(developmentname), _option_("--textus.component.version="))
   }
 
   private def _standalone_registration_base_url(command: CncfCommand.Execute): Option[String] =

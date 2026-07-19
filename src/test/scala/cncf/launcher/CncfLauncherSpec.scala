@@ -1379,12 +1379,12 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     When("the current-project canonical server command completes")
     val currentprojectcode = launcher.run(Vector("server", "--textus.server.port=18014"))
 
-    Then("it reports a distinct current-project invocation through the same lifecycle")
+    Then("it reports the current component development directory through the same lifecycle")
     _assert_equals(currentprojectcode, 0)
     _assert_equals(reporter.starts.size, 2)
     _assert_equals(reporter.closes, 2)
-    _assert_equals(reporter.starts(1)._1.target, "current-project")
-    _assert_equals(reporter.starts(1)._1.subsystemName, None)
+    _assert_equals(reporter.starts(1)._1.target, "work")
+    _assert_equals(reporter.starts(1)._1.subsystemName, Some("work"))
 
     And("registration setup failure does not prevent canonical server startup")
     val outageinvoker = FakeInvoker()
