@@ -8,7 +8,7 @@ import scala.util.Try
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 19, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -344,12 +344,17 @@ final class CncfLauncher(
     if (!command.args.headOption.contains("server")) {
       CncfTextusControlCenterRegistrationSession.noop
     } else {
-      config.textusControlCenterRegistration match {
-        case Some(registration) =>
+      val registration = config.textusControlCenterRegistration.map(value => value -> environment.get(value.tokenEnv)).orElse {
+        Option.when(!config.textusControlCenterRegistrationEnabled.contains(false))(
+          CncfTextusControlCenterStandaloneLocator.resolve(paths).map(value => value.config -> Some(value.token))
+        ).flatten
+      }
+      registration match {
+        case Some((configuration, token)) =>
           try {
             val target = _registration_target(command.args)
             registrationreporter.start(
-              registration,
+              configuration,
               CncfTextusControlCenterRegistrationReport(
                 instanceId = java.util.UUID.randomUUID().toString,
                 target = target._1,
@@ -358,7 +363,7 @@ final class CncfLauncher(
                 runtimeVersion = runtimeversion,
                 startedAt = java.time.Instant.now()
               ),
-              environment.get(registration.tokenEnv)
+              token
             )
           } catch {
             case _: Throwable =>

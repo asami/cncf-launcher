@@ -214,7 +214,8 @@ textus-control-center:
     timeout: 2s
     heartbeat-interval: 30s
     host-label: development-a
-    base-url: https://subsystem.example.test
+    # Optional public endpoint override:
+    # base-url: https://subsystem.example.test
 ```
 
 `endpoint` is the Textus Control Center subsystem-inventory operation base URL. The
@@ -223,6 +224,11 @@ credential named by `token-env`; it never writes or prints the credential
 value. Requests use the configured bounded timeout. Missing credentials,
 authorization rejection, and Textus Control Center outages emit a sanitized warning but
 do not prevent the target server from starting.
+
+When `base-url` is omitted, registration waits until the CNCF runtime has bound
+and uses its actual loopback endpoint. This includes additional instances
+allocated from the dynamic port range. Set `base-url` only when the registered
+public endpoint differs from the runtime bind endpoint, such as behind a proxy.
 
 Higher-precedence project launcher configuration may override the global
 switch. In normal operation, `launcher.yaml` is the single place that controls
