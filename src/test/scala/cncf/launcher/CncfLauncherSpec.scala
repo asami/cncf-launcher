@@ -1355,6 +1355,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         |""".stripMargin)
     _write(paths.cwd.resolve("project.yaml"),
       """project:
+        |  name: textus-current
         |  component:
         |    name: current-component
         |""".stripMargin)
@@ -1391,6 +1392,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(reporter.starts.size, 2)
     _assert_equals(reporter.closes, 2)
     _assert_equals(reporter.starts(1)._1.target, "current-component")
+    _assert_equals(reporter.starts(1)._1.artifactId, Some("textus-current"))
     _assert_equals(reporter.starts(1)._1.executionMode, "development")
     _assert_equals(reporter.starts(1)._1.developmentDirectory, Some(paths.cwd.toAbsolutePath.normalize.toString))
     _assert_equals(reporter.starts(1)._1.subsystemName, Some("current-component"))
@@ -1489,6 +1491,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       val report = CncfTextusControlCenterRegistrationReport(
         instanceId = "cncf-registration-http-spec",
         target = "textus-registration",
+        artifactId = Some("textus-registration"),
         executionMode = "repository",
         developmentDirectory = None,
         subsystemName = Some("textus-registration"),
@@ -1508,6 +1511,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       requests.iterator.asScala.map(_._1).exists(_.contains("deregister-subsystem")) shouldBe true
       requests.iterator.asScala.forall(_._2 == "Bearer test-token") shouldBe true
       requests.iterator.asScala.forall { case (path, _) => path.contains("instanceId=cncf-registration-http-spec") } shouldBe true
+      requests.iterator.asScala.forall { case (path, _) => path.contains("artifactId=textus-registration") } shouldBe true
       requests.iterator.asScala.forall { case (path, _) => path.contains("?protocolVersion=1&instanceId=") } shouldBe true
 
       Given("registration without an explicit public base URL")
@@ -1573,6 +1577,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       val report = CncfTextusControlCenterRegistrationReport(
         instanceId = "cncf-registration-http-failure-spec",
         target = "textus-registration",
+        artifactId = Some("textus-registration"),
         executionMode = "repository",
         developmentDirectory = None,
         subsystemName = Some("textus-registration"),

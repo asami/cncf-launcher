@@ -64,6 +64,7 @@ object CncfTextusControlCenterRegistrationConfig {
 final case class CncfTextusControlCenterRegistrationReport(
   instanceId: String,
   target: String,
+  artifactId: Option[String],
   executionMode: String,
   developmentDirectory: Option[String],
   subsystemName: Option[String],
@@ -210,7 +211,7 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
       "hostLabel" -> config.hostLabel,
       "startedAt" -> report.startedAt.toString,
       "launcherState" -> state
-    ) ++ report.developmentDirectory.map("developmentDirectory" -> _).toVector ++ report.subsystemName.map("subsystemName" -> _).toVector ++ report.subsystemVersion.map("subsystemVersion" -> _).toVector
+    ) ++ report.artifactId.map("artifactId" -> _).toVector ++ report.developmentDirectory.map("developmentDirectory" -> _).toVector ++ report.subsystemName.map("subsystemName" -> _).toVector ++ report.subsystemVersion.map("subsystemVersion" -> _).toVector
 
   private def _operation_endpoint(
     config: CncfTextusControlCenterRegistrationConfig,

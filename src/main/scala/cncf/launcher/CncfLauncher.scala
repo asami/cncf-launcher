@@ -361,6 +361,7 @@ final class CncfLauncher(
               CncfTextusControlCenterRegistrationReport(
                 instanceId = java.util.UUID.randomUUID().toString,
                 target = target.name,
+                artifactId = target.artifactId,
                 executionMode = target.executionMode,
                 developmentDirectory = target.developmentDirectory,
                 subsystemName = target.subsystemName,
@@ -381,6 +382,7 @@ final class CncfLauncher(
 
   private final case class RegistrationTarget(
     name: String,
+    artifactId: Option[String],
     executionMode: String,
     developmentDirectory: Option[String],
     subsystemName: Option[String],
@@ -398,18 +400,18 @@ final class CncfLauncher(
     developmentdirectory match {
       case Some(directory) =>
         val name = _project_component_name(directory).getOrElse(_file_name_(directory.toString))
-        RegistrationTarget(name, "development", Some(directory.toString), Some(name), None)
+        RegistrationTarget(name, _project_artifact_id(directory), "development", Some(directory.toString), Some(name), None)
       case None => subsystemname match {
         case Some(name) =>
-          RegistrationTarget(name, "repository", None, Some(name), _option_("--textus.component.version="))
+          RegistrationTarget(name, None, "repository", None, Some(name), _option_("--textus.component.version="))
         case None => _option_("--component-file=").orElse(_option_("--subsystem-file=")) match {
           case Some(file) =>
             val name = _file_name_(file)
-            RegistrationTarget(name, "artifact-file", None, Some(name), None)
+            RegistrationTarget(name, None, "artifact-file", None, Some(name), None)
           case None =>
             val directory = _development_directory(".")
             val name = _project_component_name(directory).getOrElse(_file_name_(directory.toString))
-            RegistrationTarget(name, "development", Some(directory.toString), Some(name), None)
+            RegistrationTarget(name, _project_artifact_id(directory), "development", Some(directory.toString), Some(name), None)
         }
       }
     }
@@ -423,6 +425,17 @@ final class CncfLauncher(
     scala.util.Try {
       LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
         .get("project.component.name")
+        .flatMap(_.headOption)
+        .map(_.trim)
+        .filter(_.nonEmpty)
+    }.toOption.flatten
+  }
+
+  private def _project_artifact_id(directory: java.nio.file.Path): Option[String] = {
+    val project = directory.resolve("project.yaml")
+    scala.util.Try {
+      LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
+        .get("project.name")
         .flatMap(_.headOption)
         .map(_.trim)
         .filter(_.nonEmpty)
