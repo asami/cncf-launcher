@@ -16,7 +16,7 @@ final case class LifecycleSupervisorState(
       case Some(result) => this -> result
       case None =>
         val result = request.action match {
-          case LifecycleAction.Start => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, instanceid, Some(now), None)
+          case LifecycleAction.Start if instanceid.isDefined => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, instanceid, Some(now), None)
           case LifecycleAction.Stop | LifecycleAction.Restart if ownedInstances.contains(request.artifactId) => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, ownedInstances.get(request.artifactId), Some(now), None)
           case _ => LifecycleSupervisorProtocol.rejected(request, supervisorId, "supervisor-ownership-unavailable")
         }
