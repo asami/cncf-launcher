@@ -3,7 +3,7 @@ package cncf.launcher
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 18, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -83,6 +83,12 @@ object CncfCommand {
     final case class ConfigShow() extends Runtime
   }
 
+  sealed trait Repository extends CncfCommand
+  object Repository {
+    final case class ListArtifacts(kind: Option[String], includeDevelopment: Boolean, developmentDirs: Vector[String]) extends Repository
+    final case class Show(target: String, kind: Option[String], includeDevelopment: Boolean, developmentDirs: Vector[String]) extends Repository
+  }
+
 
   enum DevTarget {
     case ProjectDev(path: Option[String])
@@ -142,6 +148,8 @@ object CncfCommandParser {
               _parse_dev(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
             case Some("runtime") =>
               _parse_runtime(rest.tail)
+            case Some("repository") =>
+              _parse_repository(rest.tail)
             case Some(_) if _is_runtime_execute(rest) =>
               CncfCommand.Execute(_runtime_execute_args(rest), runtimeversion, runtimedevdir)
             case Some(other) =>
@@ -151,6 +159,54 @@ object CncfCommandParser {
           }
       }
     }
+  }
+
+  private def _parse_repository(args: Vector[String]): CncfCommand.Repository = {
+    if (args.isEmpty) throw CncfException("cncf repository requires list or show")
+    val operation = args.head
+    var kind: Option[String] = None
+    var includedevelopment = false
+    var developmentdirs = Vector.empty[String]
+    var positional = Vector.empty[String]
+    var i = 1
+    while (i < args.length) {
+      args(i) match {
+        case "--kind" =>
+          if (i + 1 >= args.length) throw CncfException("--kind requires car or sar")
+          kind = Some(_repository_kind(args(i + 1)))
+          i += 2
+        case value if value.startsWith("--kind=") =>
+          kind = Some(_repository_kind(value.stripPrefix("--kind=")))
+          i += 1
+        case "--include-development" =>
+          includedevelopment = true
+          i += 1
+        case "--development-dir" =>
+          if (i + 1 >= args.length) throw CncfException("--development-dir requires a value")
+          developmentdirs :+= args(i + 1)
+          i += 2
+        case value if value.startsWith("--development-dir=") =>
+          developmentdirs :+= value.stripPrefix("--development-dir=")
+          i += 1
+        case value if value.startsWith("--") => throw CncfException(s"unknown cncf repository option: $value")
+        case value =>
+          positional :+= value
+          i += 1
+      }
+    }
+    operation match {
+      case "list" if positional.isEmpty => CncfCommand.Repository.ListArtifacts(kind, includedevelopment, developmentdirs)
+      case "show" if positional.size == 1 => CncfCommand.Repository.Show(positional.head, kind, includedevelopment, developmentdirs)
+      case "list" => throw CncfException("cncf repository list accepts only repository options")
+      case "show" => throw CncfException("cncf repository show requires one artifact id or component directory")
+      case other => throw CncfException(s"unknown cncf repository command: $other")
+    }
+  }
+
+  private def _repository_kind(value: String): String = value.toLowerCase match {
+    case "car" => "car"
+    case "sar" => "sar"
+    case other => throw CncfException(s"unsupported repository artifact kind: $other")
   }
 
   private def _parse_install_cli(
@@ -626,6 +682,8 @@ object CncfCommandParser {
       |  cncf runtime use <version> --project
       |  cncf runtime cache status
       |  cncf runtime config show
+      |  cncf repository list [--kind car|sar] [--include-development] [--development-dir <dir>...]
+      |  cncf repository show <artifact-id|component-dir> [--kind car|sar] [--include-development] [--development-dir <dir>...]
       |
       |Runtime:
       |  --runtime <version> overrides .cncf/version and ~/.cncf/version.
@@ -666,6 +724,7 @@ object CncfCommandParser {
       |  Publish dependency components there with sbt cozyPublishLocalCar or sbt cozyPublishLocalSar.
       |  ~/.cncf/local is developer local publish state; ~/.cncf/cache is runtime-managed remote artifact cache.
       |  Snapshot components are local-only by default; missing snapshots should be published with sbt cozyPublishLocalCar.
+      |  Repository discovery reads the local component index and only explicitly admitted development directories.
       |  Web app source lives under src/main/web; descriptor source metadata lives under src/main/web-inf.
       |  src/main/web/WEB-INF is for private Web resources, not generated descriptor source.
       |  textus server <artifact> is the CAR/SAR artifact launcher for repository-based application startup.

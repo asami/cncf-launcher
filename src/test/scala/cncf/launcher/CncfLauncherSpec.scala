@@ -14,7 +14,7 @@ import scala.jdk.CollectionConverters.*
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -95,8 +95,15 @@ object CncfLauncherSpec {
     spec.devRuntimeConflictDefaultsToError()
     spec.devRuntimeConflictCanUseNewestPolicy()
     spec.runtimeCommandDoesNotLoadCncf()
+    spec.componentRepositoryCommandParser()
+    spec.componentRepositoryDevelopmentOverridesLocalIdentity()
+    spec.componentRepositoryRejectsImplicitDevelopmentDirectory()
+    spec.componentRepositoryShowUsesDescriptorIdentity()
+    spec.componentRepositoryOutputMatchesTextusIdentityColumns()
+    spec.componentRepositoryMalformedLocalIndexIsDiagnosed()
+    spec.componentRepositoryCommandDoesNotLoadCncfRuntime()
     spec.latestRuntimeIsConcrete()
-    spec.noRuntimeLibraryDependencies()
+    spec.noCncfRuntimeLibraryDependencies()
     println("CncfLauncherSpec: OK")
   }
 }
@@ -132,6 +139,36 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         devServerParserSupportsProcessManagementOptions()
       }
 
+    }
+
+    "component repository development discovery" which {
+      "parse local and admitted development commands" in {
+        componentRepositoryCommandParser()
+      }
+
+      "prefer admitted development identity over local release identity" in {
+        componentRepositoryDevelopmentOverridesLocalIdentity()
+      }
+
+      "reject implicit development directory discovery" in {
+        componentRepositoryRejectsImplicitDevelopmentDirectory()
+      }
+
+      "show a directory using descriptor identity" in {
+        componentRepositoryShowUsesDescriptorIdentity()
+      }
+
+      "match Textus identity output columns" in {
+        componentRepositoryOutputMatchesTextusIdentityColumns()
+      }
+
+      "diagnose a malformed local index without leaking its path" in {
+        componentRepositoryMalformedLocalIndexIsDiagnosed()
+      }
+
+      "run repository discovery without loading CNCF runtime" in {
+        componentRepositoryCommandDoesNotLoadCncfRuntime()
+      }
     }
 
     "configuration and launcher metadata" which {
@@ -634,7 +671,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         Given("the cncf launcher scenario: no runtime library dependencies")
         When("the launcher behavior is exercised")
         Then("the executable specification holds through scenario-specific expectations")
-        noRuntimeLibraryDependencies()
+        noCncfRuntimeLibraryDependencies()
       }
 
     }
@@ -2557,16 +2594,118 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(resolver.resolvedVersions, Vector(LauncherConfig.DEFAULT_RUNTIME_VERSION))
   }
 
-  def noRuntimeLibraryDependencies(): Unit = {
-    val lines = Files.readString(Path.of("build.sbt")).linesIterator.toVector.map(_.trim)
-    def _runtime_library_dependency_(line: String): Boolean =
-      line.contains("libraryDependencies") &&
-        line.contains("\"") &&
-        !line.contains("goldenport-launcher-core") &&
-        !line.contains("% Test") &&
-        !line.contains("% \"test\"")
-    lines.exists(_runtime_library_dependency_) shouldBe false
-    lines.exists(_.contains("goldenport-launcher-core")) shouldBe true
+  def componentRepositoryCommandParser(): Unit = {
+    Given("repository list and show commands with explicit development admission")
+    When("the CNCF command parser reads their options")
+    val list = CncfCommandParser.parse(Vector("repository", "list", "--kind", "car", "--include-development", "--development-dir", "../dependency"))
+      .asInstanceOf[CncfCommand.Repository.ListArtifacts]
+    val show = CncfCommandParser.parse(Vector("repository", "show", "textus-blog", "--kind=sar"))
+      .asInstanceOf[CncfCommand.Repository.Show]
+
+    Then("kind, current project admission, and extra directories remain explicit")
+    list.kind shouldBe Some("car")
+    list.includeDevelopment shouldBe true
+    list.developmentDirs shouldBe Vector("../dependency")
+    show.target shouldBe "textus-blog"
+    show.kind shouldBe Some("sar")
+  }
+
+  def componentRepositoryDevelopmentOverridesLocalIdentity(): Unit = _with_temp_paths { paths =>
+    Given("a local repository entry and an admitted checkout with the same descriptor identity")
+    _write(paths.localRepository.resolve("repository/catalog/index.json"), _component_repository_index("car", "textus-blog", "1.0.0"))
+    _write(paths.cwd.resolve("checkout/project.yaml"), _component_project_yaml("textus-blog", "car", "1.1.0-SNAPSHOT"))
+    val discovery = CncfComponentRepositoryDiscovery(paths)
+
+    When("CNCF lists component repository entries")
+    val result = discovery.list(None, false, Vector("checkout"))
+
+    Then("the development entry overrides the local release entry")
+    result.artifacts should have size 1
+    result.artifacts.head.origin shouldBe "development"
+    result.artifacts.head.status shouldBe "active"
+    result.artifacts.head.recommended shouldBe Some("1.1.0-SNAPSHOT")
+    result.artifacts.head.render should not include paths.cwd.toString
+  }
+
+  def componentRepositoryRejectsImplicitDevelopmentDirectory(): Unit = _with_temp_paths { paths =>
+    Given("a current checkout with project metadata but no development admission option")
+    _write(paths.cwd.resolve("project.yaml"), _component_project_yaml("current-component", "car", "1.0.0-SNAPSHOT"))
+    val discovery = CncfComponentRepositoryDiscovery(paths)
+
+    When("CNCF lists component repository entries with and without explicit admission")
+    val hidden = discovery.list(None, false, Vector.empty)
+    val admitted = discovery.list(None, true, Vector.empty)
+    val admittedtwice = discovery.list(None, true, Vector("."))
+
+    Then("the current checkout is not included implicitly or duplicated by equivalent admissions")
+    hidden.artifacts shouldBe empty
+    admitted.artifacts.map(_.artifactId) shouldBe Vector("current-component")
+    admittedtwice.artifacts.map(_.artifactId) shouldBe Vector("current-component")
+    admittedtwice.diagnostics shouldBe empty
+  }
+
+  def componentRepositoryShowUsesDescriptorIdentity(): Unit = _with_temp_paths { paths =>
+    Given("a development directory whose name differs from project.name")
+    _write(paths.cwd.resolve("misleading-directory/project.yaml"), _component_project_yaml("canonical-component", "car", "2.0.0-SNAPSHOT"))
+    val discovery = CncfComponentRepositoryDiscovery(paths)
+
+    When("CNCF shows the explicitly selected directory")
+    val result = discovery.show("misleading-directory", None, false, Vector.empty)
+
+    Then("project.yaml defines the CAR identity and version")
+    result.artifact.artifactId shouldBe "canonical-component"
+    result.artifact.recommended shouldBe Some("2.0.0-SNAPSHOT")
+    result.artifact.origin shouldBe "development"
+  }
+
+  def componentRepositoryOutputMatchesTextusIdentityColumns(): Unit = _with_temp_paths { paths =>
+    Given("the shared CNCF component repository index fixture")
+    _write(paths.localRepository.resolve("repository/catalog/index.json"), _component_repository_index("sar", "sample-app", "1.2.0"))
+    When("CNCF renders its normalized local entry")
+    val result = CncfComponentRepositoryDiscovery(paths).list(None, false, Vector.empty)
+
+    val columns = result.artifacts.head.render.split("\\t").toVector
+
+    Then("kind, artifact id, lifecycle, selector, origin, and source columns match the Textus contract")
+    columns.take(5) shouldBe Vector("sar", "sample-app", "active", "1.2.0", "local")
+    columns should have size 6
+  }
+
+  def componentRepositoryMalformedLocalIndexIsDiagnosed(): Unit = _with_temp_paths { paths =>
+    Given("a malformed machine-local component repository index")
+    _write(paths.localRepository.resolve("repository/catalog/index.json"), "{not-json")
+
+    When("CNCF discovers local components")
+    val result = CncfComponentRepositoryDiscovery(paths).list(None, false, Vector.empty)
+
+    Then("the invalid source is ignored and diagnosed without exposing an absolute path")
+    result.artifacts shouldBe empty
+    result.diagnostics should have size 1
+    result.diagnostics.head should include("ignored malformed local component repository index")
+    result.diagnostics.head should not include paths.home.toString
+  }
+
+  def componentRepositoryCommandDoesNotLoadCncfRuntime(): Unit = _with_temp_paths { paths =>
+    Given("a valid machine-local component repository index")
+    _write(paths.localRepository.resolve("repository/catalog/index.json"), _component_repository_index("car", "sample-component", "1.2.0"))
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    When("the launcher executes repository list")
+    val (code, output) = _capture_stdout(launcher.run(Vector("repository", "list")))
+
+    Then("the launcher renders repository entries without resolving or invoking CNCF runtime")
+    code shouldBe 0
+    output should include("car\tsample-component\tactive\t1.2.0\tlocal\t")
+    resolver.resolvedClasspaths shouldBe empty
+    invoker.lastArgs shouldBe empty
+  }
+
+  def noCncfRuntimeLibraryDependencies(): Unit = {
+    val build = Files.readString(Path.of("build.sbt"))
+    build should not include "goldenport-cncf"
+    build should include("goldenport-launcher-core")
   }
 
   private def _capture_stdout(f: => Int): (Int, String) = {
@@ -2718,6 +2857,32 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
        |        excluded: []
        |        tested:
        |${tested.map(v => s"          - $v").mkString("\n")}
+       |""".stripMargin
+
+  private def _component_project_yaml(artifactid: String, kind: String, version: String): String =
+    s"""project:
+       |  name: $artifactid
+       |  kind: $kind
+       |  component:
+       |    name: component-name-that-does-not-define-artifact-identity
+       |    version: $version
+       |packaging:
+       |  kind: $kind
+       |""".stripMargin
+
+  private def _component_repository_index(kind: String, artifactid: String, version: String): String =
+    s"""{
+       |  "schemaVersion": "cncf.component-repository-index.v1",
+       |  "generatedAt": "2026-07-21T00:00:00Z",
+       |  "artifacts": [{
+       |    "kind": "$kind",
+       |    "artifactId": "$artifactid",
+       |    "catalog": "$kind/$artifactid.yaml",
+       |    "status": "active",
+       |    "recommended": "$version",
+       |    "latestStable": "$version"
+       |  }]
+       |}
        |""".stripMargin
 }
 

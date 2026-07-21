@@ -8,7 +8,7 @@ import scala.util.Try
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 21, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -45,12 +45,30 @@ final class CncfLauncher(
         0
       case runtime: CncfCommand.Runtime =>
         _run_runtime(runtime, config)
+      case repository: CncfCommand.Repository =>
+        _run_repository(repository)
       case install: CncfCommand.InstallCli =>
         _run_install_cli(install, configfiles, cncfconfigfiles)
       case execute: CncfCommand.Execute =>
         _run_execute(execute, config)
       case dev: CncfCommand.Dev =>
         _run_dev(dev, configfiles, cncfconfigfiles)
+    }
+  }
+
+  private def _run_repository(command: CncfCommand.Repository): Int = {
+    val discovery = CncfComponentRepositoryDiscovery(paths)
+    command match {
+      case CncfCommand.Repository.ListArtifacts(kind, includedevelopment, developmentdirs) =>
+        val result = discovery.list(kind, includedevelopment, developmentdirs)
+        result.diagnostics.foreach(message => Console.err.println(s"warning: $message"))
+        result.artifacts.foreach(artifact => println(artifact.render))
+        0
+      case CncfCommand.Repository.Show(target, kind, includedevelopment, developmentdirs) =>
+        val result = discovery.show(target, kind, includedevelopment, developmentdirs)
+        result.diagnostics.foreach(message => Console.err.println(s"warning: $message"))
+        println(result.artifact.renderDetailed)
+        0
     }
   }
 

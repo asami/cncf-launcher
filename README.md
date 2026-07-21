@@ -16,10 +16,23 @@ cncf runtime use recommended
 cncf runtime use latest
 cncf runtime use newest
 
+cncf repository list
+cncf repository list --kind car --include-development
+cncf repository show textus-blog --kind car
+cncf repository show ../textus-blog
+
 cncf /Users/asami/src/dev2026/textus-sanpomap command validate-presentation --presentationDsl presentation-dsl.yaml
 cncf . server
 cncf textus-sanpomap:0.2.0-SNAPSHOT client
 ```
+
+`cncf repository list` and `cncf repository show` inspect the machine-local
+CAR/SAR catalog under `~/.cncf/local`. Development checkouts are excluded by
+default. Admit the current checkout with `--include-development`, admit other
+checkouts explicitly with repeatable `--development-dir <dir>`, or pass a
+component directory directly to `repository show`. Development identity comes
+from `project.yaml`, not the directory name, and overrides a matching local
+artifact while preserving the shared six-column repository output contract.
 
 `cncf dev ...` is deprecated. Use target-first `command`, `server`, and
 `client` syntax. `cncf dev` remains only as a compatibility alias and is not
