@@ -11,7 +11,8 @@ import scala.util.Try
  */
 final case class LifecycleSupervisorLaunchProfile(
   artifactId: String,
-  developmentDirectory: Path
+  developmentDirectory: Path,
+  defaultPort: Int
 )
 
 final class LifecycleSupervisorProfileResolver(paths: LauncherPaths) {
@@ -58,13 +59,13 @@ final class LifecycleSupervisorProfileResolver(paths: LauncherPaths) {
       case Some(path) =>
         val normalized = path.toAbsolutePath.normalize
         _descriptor_identity(normalized) match {
-          case Some(("car", identity)) if identity == artifactid => Right(LifecycleSupervisorLaunchProfile(artifactid, normalized))
+          case Some(("car", identity, port)) if identity == artifactid => Right(LifecycleSupervisorLaunchProfile(artifactid, normalized, port))
           case _ => Left(PROFILE_UNAVAILABLE)
         }
       case None => Left(PROFILE_UNAVAILABLE)
     }
 
-  private def _descriptor_identity(directory: Path): Option[(String, String)] = {
+  private def _descriptor_identity(directory: Path): Option[(String, String, Int)] = {
     val descriptor = directory.resolve("project.yaml")
     if (!Files.isRegularFile(descriptor))
       None
@@ -73,7 +74,12 @@ final class LifecycleSupervisorProfileResolver(paths: LauncherPaths) {
         val values = LauncherConfigParser.parse(descriptor, Files.readString(descriptor, StandardCharsets.UTF_8))
         val kind = _first(values, "project.kind").orElse(_first(values, "packaging.kind"))
         val artifactid = _first(values, "project.name")
-        kind.flatMap(value => artifactid.map(value -> _))
+        val port = _first(values, "project.component.config.textus.server.default-port").flatMap(value => Try(value.toInt).toOption).filter(value => value >= 1 && value <= 65535)
+        for {
+          value <- kind
+          identity <- artifactid
+          number <- port
+        } yield (value, identity, number)
       }.toOption.flatten
   }
 

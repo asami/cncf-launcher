@@ -4,7 +4,7 @@ import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import java.net.{HttpURLConnection, InetSocketAddress, URI}
+import java.net.{HttpURLConnection, InetAddress, InetSocketAddress, ServerSocket, URI}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -114,6 +114,10 @@ object CncfLauncherSpec {
     spec.lifecycleSupervisorRejectsPersistedOwnershipWithoutChildHandle()
     spec.lifecycleSupervisorRejectsDuplicateOrDeadChildStart()
     spec.lifecycleSupervisorStopsChildWhenStatePersistenceFails()
+    spec.lifecycleSupervisorUsesDescriptorPortAndCanonicalDevelopmentCommand()
+    spec.lifecycleSupervisorRejectsUnavailablePortBeforeStartOrRestart()
+    spec.lifecycleSupervisorReleasesOwnershipWhenRestartReplacementFails()
+    spec.lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted()
     spec.latestRuntimeIsConcrete()
     spec.noCncfRuntimeLibraryDependencies()
     println("CncfLauncherSpec: OK")
@@ -218,6 +222,22 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       "stop a newly spawned child when its lifecycle state cannot be persisted" in {
         lifecycleSupervisorStopsChildWhenStatePersistenceFails()
+      }
+
+      "derive a declared port and canonical development-directory child command" in {
+        lifecycleSupervisorUsesDescriptorPortAndCanonicalDevelopmentCommand()
+      }
+
+      "reject an unavailable port before starting or stopping an owned child" in {
+        lifecycleSupervisorRejectsUnavailablePortBeforeStartOrRestart()
+      }
+
+      "release stopped ownership when a restart replacement cannot start" in {
+        lifecycleSupervisorReleasesOwnershipWhenRestartReplacementFails()
+      }
+
+      "fail closed after it cannot persist a stopped-child restart failure" in {
+        lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted()
       }
     }
 
@@ -2769,14 +2789,17 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     Then("the descriptor identity selects the configured directory rather than its filesystem name")
     result.map(_.artifactId) shouldBe Right("textus-control-center")
     result.map(_.developmentDirectory) shouldBe Right(project.toAbsolutePath.normalize)
+    result.map(_.defaultPort) shouldBe Right(18013)
   }
 
   def lifecycleSupervisorRejectsMalformedDevelopmentProfile(): Unit = _with_temp_paths { paths =>
-    Given("missing, relative, duplicate, and descriptor-mismatched supervisor profiles")
+    Given("missing, relative, duplicate, portless, and descriptor-mismatched supervisor profiles")
     val duplicateproject = paths.cwd.resolve("duplicate")
     val mismatched = paths.cwd.resolve("mismatched")
+    val portless = paths.cwd.resolve("portless")
     _write(duplicateproject.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
     _write(mismatched.resolve("project.yaml"), _component_project_yaml("other-component", "car", "1.0.0-SNAPSHOT"))
+    _write(portless.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", 0))
 
     When("the supervisor resolves the declared operational component")
     val missing = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
@@ -2802,25 +2825,34 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
          |    textus-control-center: ${mismatched.toAbsolutePath}
          |""".stripMargin)
     val mismatch = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+    _write(paths.supervisorConfig,
+      s"""schema: cncf.launcher.supervisor.v1
+         |profiles:
+         |  development-directory:
+         |    textus-control-center: ${portless.toAbsolutePath}
+         |""".stripMargin)
+    val invalidport = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
 
     Then("each unavailable profile returns one stable safe diagnostic without fallback discovery")
     missing shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
     relative shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
     duplicate shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
     mismatch shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+    invalidport shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
   }
 
   def lifecycleSupervisorProjectsProfileResolutionToHttp(): Unit = _with_temp_paths { paths =>
-    Given("an authenticated supervisor with one explicitly registered CAR development directory")
+    Given("an authenticated supervisor with one explicitly registered CAR development directory and an occupied declared port")
     val project = paths.cwd.resolve("registered")
-    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    val listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress)
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", listener.getLocalPort))
     _write(paths.supervisorConfig,
       s"""schema: cncf.launcher.supervisor.v1
          |profiles:
          |  development-directory:
          |    textus-control-center: ${project.toAbsolutePath}
          |""".stripMargin)
-    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths)).start(0)
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
 
     try {
       When("the lifecycle endpoint receives requests for a registered and an unregistered artifact")
@@ -2828,12 +2860,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       val registered = _post_lifecycle_request(endpoint, "textus-control-center", "registered-request", "registered-key")
       val unavailable = _post_lifecycle_request(endpoint, "other-component", "unavailable-request", "unavailable-key")
 
-      Then("the HTTP projection keeps directory data private and distinguishes the safe profile result")
-      registered should include("supervisor-execution-unavailable")
+      Then("the default supervisor factory performs private port preflight without leaking the directory")
+      registered should include(LifecycleSupervisorDevelopmentDirectoryChildFactory.PORT_UNAVAILABLE)
       registered should not include project.toString
       unavailable should include(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
     } finally {
       server.stop(0)
+      listener.close()
     }
   }
 
@@ -2893,7 +2926,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       |""".stripMargin)
     var started = Vector.empty[LifecycleSupervisorChild]
     val factory = new LifecycleSupervisorChildFactory {
-      def start(artifactId: String) = {
+      def start(profile: LifecycleSupervisorLaunchProfile) = {
         val child = new LifecycleSupervisorChild {
           val instanceId = s"instance-${started.size + 1}"
           var alive = true
@@ -2936,7 +2969,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       def stop() = { alive = false; true }
     }
     val factory = new LifecycleSupervisorChildFactory {
-      def start(artifactId: String) = Right(child)
+      def start(profile: LifecycleSupervisorLaunchProfile) = Right(child)
     }
     val store = LifecycleSupervisorStateStore(paths, "local-supervisor")
     val first = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(store), factory).start(0)
@@ -2980,7 +3013,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       def stop() = { deadchildstopped = true; true }
     }
     val factory = new LifecycleSupervisorChildFactory {
-      def start(artifactId: String) = {
+      def start(profile: LifecycleSupervisorLaunchProfile) = {
         starts += 1
         Right(if (starts == 1) runningchild else deadchild)
       }
@@ -3024,7 +3057,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       def stop() = { alive = false; true }
     }
     val factory = new LifecycleSupervisorChildFactory {
-      def start(artifactId: String) = Right(child)
+      def start(profile: LifecycleSupervisorLaunchProfile) = Right(child)
     }
     val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), factory).start(0)
     try {
@@ -3035,6 +3068,200 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       Then("the request is rejected and the child is compensatingly stopped")
       response should include(LifecycleSupervisorStateStore.STATE_UNAVAILABLE)
       child.isAlive shouldBe false
+    } finally server.stop(0)
+  }
+
+  def lifecycleSupervisorUsesDescriptorPortAndCanonicalDevelopmentCommand(): Unit = _with_temp_paths { paths =>
+    Given("a resolved development profile with a declared default port")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", 18013))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    val profile = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center").toOption.get
+    var command = Vector.empty[String]
+    var directory = Option.empty[Path]
+    val child = new LifecycleSupervisorChild {
+      val instanceId = "instance-1"
+      override val port = 18013
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    val runner = new LifecycleSupervisorCommandRunner {
+      def start(value: Vector[String], cwd: Path, port: Int) = {
+        command = value
+        directory = Some(cwd)
+        Right(child)
+      }
+    }
+    val factory = LifecycleSupervisorDevelopmentDirectoryChildFactory(new LifecycleSupervisorPortProbe {
+      def isAvailable(port: Int) = true
+    }, runner)
+
+    When("the factory starts the resolved profile")
+    val result = factory.start(profile)
+
+    Then("it uses a fixed target-first cncf server command and the descriptor port")
+    result.map(_.port) shouldBe Right(18013)
+    command shouldBe Vector("cncf", project.toAbsolutePath.normalize.toString, "server", "--textus.server.port=18013")
+    directory shouldBe Some(project.toAbsolutePath.normalize)
+  }
+
+  def lifecycleSupervisorRejectsUnavailablePortBeforeStartOrRestart(): Unit = _with_temp_paths { paths =>
+    Given("a declared port already occupied on loopback and factories that fail preflight before process creation")
+    val project = paths.cwd.resolve("component")
+    val listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress)
+    val declaredport = listener.getLocalPort
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", declaredport))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    var starts = 0
+    val child = new LifecycleSupervisorChild {
+      val instanceId = "instance-1"
+      override val port = declaredport
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    val runner = new LifecycleSupervisorCommandRunner {
+      def start(command: Vector[String], directory: Path, port: Int) = {
+        starts += 1
+        Right(child)
+      }
+    }
+    val blocked = LifecycleSupervisorDevelopmentDirectoryChildFactory(LifecycleSupervisorPortProbe.System, runner)
+    val blockedserver = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), blocked).start(0)
+    try {
+      When("a start request encounters the occupied declared port")
+      val endpoint = s"http://127.0.0.1:${blockedserver.getAddress.getPort}/v1/lifecycle-requests"
+      val response = _post_lifecycle_request(endpoint, "textus-control-center", "blocked-start", "blocked-key")
+
+      Then("it rejects before spawning a child")
+      response should include(LifecycleSupervisorDevelopmentDirectoryChildFactory.PORT_UNAVAILABLE)
+      starts shouldBe 0
+    } finally {
+      blockedserver.stop(0)
+      listener.close()
+    }
+
+    val restartfactory = new LifecycleSupervisorChildFactory {
+      override def preflight(profile: LifecycleSupervisorLaunchProfile, owned: Option[LifecycleSupervisorChild]) =
+        if (owned.isDefined) Left(LifecycleSupervisorDevelopmentDirectoryChildFactory.PORT_UNAVAILABLE) else Right(())
+      def start(profile: LifecycleSupervisorLaunchProfile) = {
+        starts += 1
+        Right(child)
+      }
+    }
+    val restartserver = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), restartfactory).start(0)
+    try {
+      When("a restart preflight fails before stopping the owned child")
+      val endpoint = s"http://127.0.0.1:${restartserver.getAddress.getPort}/v1/lifecycle-requests"
+      _post_lifecycle_request(endpoint, "textus-control-center", "restart-start", "restart-start-key") should include("instance-1")
+      val response = _post_lifecycle_request(endpoint, "textus-control-center", "blocked-restart", "blocked-restart-key", "restart")
+
+      Then("the preflight rejection leaves the currently owned child running")
+      response should include(LifecycleSupervisorDevelopmentDirectoryChildFactory.PORT_UNAVAILABLE)
+      child.isAlive shouldBe true
+      starts shouldBe 1
+    } finally restartserver.stop(0)
+  }
+
+  def lifecycleSupervisorReleasesOwnershipWhenRestartReplacementFails(): Unit = _with_temp_paths { paths =>
+    Given("a supervisor child whose restart replacement cannot be created")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", 18013))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    val first = new LifecycleSupervisorChild {
+      val instanceId = "first-instance"
+      override val port = 18013
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    val recovered = new LifecycleSupervisorChild {
+      val instanceId = "recovered-instance"
+      override val port = 18013
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    var starts = 0
+    val factory = new LifecycleSupervisorChildFactory {
+      def start(profile: LifecycleSupervisorLaunchProfile) = {
+        starts += 1
+        starts match {
+          case 1 => Right(first)
+          case 2 => Left("supervisor-execution-unavailable")
+          case _ => Right(recovered)
+        }
+      }
+    }
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), factory).start(0)
+    try {
+      When("Restart stops the owned child and its replacement startup fails")
+      val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
+      _post_lifecycle_request(endpoint, "textus-control-center", "first-start", "first-key") should include("first-instance")
+      val failed = _post_lifecycle_request(endpoint, "textus-control-center", "failed-restart", "restart-key", "restart")
+      val recoveredstart = _post_lifecycle_request(endpoint, "textus-control-center", "recovered-start", "recovered-key")
+
+      Then("the failed result releases the stopped ownership for a later Start")
+      failed should include("\"state\":\"failed\"")
+      failed should include("supervisor-execution-unavailable")
+      first.isAlive shouldBe false
+      recoveredstart should include("recovered-instance")
+      starts shouldBe 3
+    } finally server.stop(0)
+  }
+
+  def lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted(): Unit = _with_temp_paths { paths =>
+    Given("a running supervisor child whose restart failure cannot be written to the state ledger")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", 18013))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    val child = new LifecycleSupervisorChild {
+      val instanceId = "first-instance"
+      override val port = 18013
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    var starts = 0
+    val factory = new LifecycleSupervisorChildFactory {
+      def start(profile: LifecycleSupervisorLaunchProfile) = {
+        starts += 1
+        if (starts == 1) Right(child) else Left("supervisor-execution-unavailable")
+      }
+    }
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), factory).start(0)
+    try {
+      When("Restart stops the child but the state target becomes unwritable before its failure record is saved")
+      val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
+      _post_lifecycle_request(endpoint, "textus-control-center", "first-start", "first-key") should include("first-instance")
+      Files.delete(paths.supervisorState)
+      Files.createDirectories(paths.supervisorState)
+      val restart = _post_lifecycle_request(endpoint, "textus-control-center", "failed-restart", "restart-key", "restart")
+      val laterstart = _post_lifecycle_request(endpoint, "textus-control-center", "later-start", "later-key")
+
+      Then("the supervisor rejects both the undiscoverable transition and future operations as state-unavailable")
+      restart should include(LifecycleSupervisorStateStore.STATE_UNAVAILABLE)
+      laterstart should include(LifecycleSupervisorStateStore.STATE_UNAVAILABLE)
+      laterstart should not include "supervisor-ownership-unavailable"
+      child.isAlive shouldBe false
+      starts shouldBe 2
     } finally server.stop(0)
   }
 
@@ -3223,13 +3450,15 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
        |${tested.map(v => s"          - $v").mkString("\n")}
        |""".stripMargin
 
-  private def _component_project_yaml(artifactid: String, kind: String, version: String): String =
+  private def _component_project_yaml(artifactid: String, kind: String, version: String, port: Int = 18013): String =
     s"""project:
        |  name: $artifactid
        |  kind: $kind
        |  component:
        |    name: component-name-that-does-not-define-artifact-identity
        |    version: $version
+       |    config:
+       |      textus.server.default-port: "$port"
        |packaging:
        |  kind: $kind
        |""".stripMargin

@@ -29,6 +29,19 @@ final case class LifecycleSupervisorState(
     }
   }
 
+  def failRestart(request: LifecycleSupervisorRequest, code: String, now: Instant): (LifecycleSupervisorState, LifecycleSupervisorResult) = {
+    val key = _key(request)
+    requests.get(key) match {
+      case Some(record) => this -> record.result
+      case None =>
+        val result = LifecycleSupervisorResult(request.requestId, "failed", Some(code), Some(code), supervisorId, None, Some(now), Some(now))
+        copy(
+          requests = requests.updated(key, LifecycleSupervisorRequestRecord(request, result)),
+          ownedInstances = ownedInstances.removed(request.artifactId)
+        ) -> result
+    }
+  }
+
   def submit(request: LifecycleSupervisorRequest, instanceid: Option[String], now: Instant): (LifecycleSupervisorState, LifecycleSupervisorResult) = {
     val key = _key(request)
     requests.get(key) match {
