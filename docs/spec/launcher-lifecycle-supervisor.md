@@ -16,6 +16,10 @@ configured CAR development directories:
 
 ```yaml
 schema: cncf.launcher.supervisor.v1
+supervisor:
+  id: local-supervisor
+  port: "18014"
+  token-env: CNCF_LIFECYCLE_SUPERVISOR_TOKEN
 profiles:
   development-directory:
     textus-control-center: /absolute/path/to/textus-control-center
@@ -33,6 +37,26 @@ directory and is reported only as
 The profile file is launcher-private. It is neither a Control Center setting
 nor a lifecycle request field, and directory values are never returned through
 the supervisor HTTP projection.
+
+`supervisor.id`, `supervisor.port`, and `supervisor.token-env` are required to
+host the standalone supervisor. The port is a valid TCP port and the token-env
+value is an environment-variable name, never a token value. Unknown keys or an
+invalid daemon declaration make the configuration unavailable rather than
+falling back to a default endpoint or credential.
+
+## Foreground Daemon
+
+The standalone host command is:
+
+```text
+cncf launcher supervisor serve
+```
+
+It resolves only `~/.cncf/launcher/supervisor.yaml`, reads the credential from
+the configured environment variable, and binds the authenticated supervisor to
+loopback. It runs in the foreground until the process is interrupted, then
+stops its HTTP listener. It does not daemonize, register an operating-system
+service, start a component by itself, or expose a non-loopback endpoint.
 
 ## Durable Request Records
 

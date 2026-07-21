@@ -3,7 +3,7 @@ package cncf.launcher
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -89,6 +89,11 @@ object CncfCommand {
     final case class Show(target: String, kind: Option[String], includeDevelopment: Boolean, developmentDirs: Vector[String]) extends Repository
   }
 
+  sealed trait Supervisor extends CncfCommand
+  object Supervisor {
+    case object Serve extends Supervisor
+  }
+
 
   enum DevTarget {
     case ProjectDev(path: Option[String])
@@ -150,6 +155,8 @@ object CncfCommandParser {
               _parse_runtime(rest.tail)
             case Some("repository") =>
               _parse_repository(rest.tail)
+            case Some("launcher") =>
+              _parse_launcher(rest.tail)
             case Some(_) if _is_runtime_execute(rest) =>
               CncfCommand.Execute(_runtime_execute_args(rest), runtimeversion, runtimedevdir)
             case Some(other) =>
@@ -160,6 +167,13 @@ object CncfCommandParser {
       }
     }
   }
+
+  private def _parse_launcher(args: Vector[String]): CncfCommand =
+    args match {
+      case Vector("supervisor", "serve") => CncfCommand.Supervisor.Serve
+      case Vector("supervisor") => throw CncfException("cncf launcher supervisor requires serve")
+      case other => throw CncfException(s"unknown cncf launcher command: ${other.mkString(" ")}")
+    }
 
   private def _parse_repository(args: Vector[String]): CncfCommand.Repository = {
     if (args.isEmpty) throw CncfException("cncf repository requires list or show")
@@ -660,6 +674,7 @@ object CncfCommandParser {
       |  cncf --version
       |  cncf version
       |  cncf launcher version
+      |  cncf launcher supervisor serve
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] install-cli <command-base-name> [--project-dev <dir>] [--component-dev-dir <dir>...] [--operation-prefix <component.service>] [--file-param <name>...] [--bin-dir <dir>] [--overwrite]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> command <operation> [args...]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> server [args...]
@@ -697,6 +712,7 @@ object CncfCommandParser {
       |  CNCF_VERSION/CNCF_RUNTIME_VERSION override the configured runtime version.
       |  CNCF_RUNTIME_DEV_DIR directly selects a local CNCF runtime checkout.
       |  CNCF_LAUNCHER_DEV_DIR directly selects a local cncf-launcher checkout.
+      |  cncf launcher supervisor serve starts the authenticated lifecycle supervisor on loopback using ~/.cncf/launcher/supervisor.yaml.
       |  Config development.enabled=true activates development.launcher.dev-dir and development.runtime.dev-dir.
       |  Config development.launcher.enabled and development.runtime.enabled override the common development switch independently.
       |  An enabled development selection requires its dev-dir unless a direct environment override supplies one.

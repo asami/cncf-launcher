@@ -31,7 +31,7 @@ final class LifecycleSupervisorProfileResolver(paths: LauncherPaths) {
       }.toEither.left.map(_ => PROFILE_UNAVAILABLE).flatten
 
   private def _parse(values: Map[String, Vector[String]]): Either[String, Map[String, LifecycleSupervisorLaunchProfile]] = {
-    val allowed = values.keys.forall(key => key == "schema" || key.startsWith(DEVELOPMENT_DIRECTORY_PREFIX))
+    val allowed = values.keys.forall(key => key == "schema" || SUPERVISOR_KEYS.contains(key) || key.startsWith(DEVELOPMENT_DIRECTORY_PREFIX))
     val schema = values.getOrElse("schema", Vector.empty)
     if (!allowed || schema != Vector(SCHEMA_VERSION))
       Left(PROFILE_UNAVAILABLE)
@@ -90,5 +90,6 @@ final class LifecycleSupervisorProfileResolver(paths: LauncherPaths) {
 object LifecycleSupervisorProfileResolver {
   val SCHEMA_VERSION = "cncf.launcher.supervisor.v1"
   val PROFILE_UNAVAILABLE = "supervisor-launch-profile-unavailable"
+  val SUPERVISOR_KEYS = Set("supervisor.id", "supervisor.port", "supervisor.token-env")
   private val DEVELOPMENT_DIRECTORY_PREFIX = "profiles.development-directory."
 }

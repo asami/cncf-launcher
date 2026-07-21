@@ -8,7 +8,7 @@ import scala.util.Try
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -19,7 +19,8 @@ final class CncfLauncher(
   processmanager: DevServerProcessManager = DevServerProcessManager.System,
   launcherdevinvoker: LauncherDevInvoker = LauncherDevInvoker.System,
   environment: Map[String, String] = sys.env,
-  registrationreporter: CncfTextusControlCenterRegistrationReporter = CncfTextusControlCenterRegistrationReporter.System
+  registrationreporter: CncfTextusControlCenterRegistrationReporter = CncfTextusControlCenterRegistrationReporter.System,
+  supervisorhost: LifecycleSupervisorDaemonHost = LifecycleSupervisorDaemonHost.System
 ) {
   def run(args: Vector[String]): Int = {
     val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
@@ -47,6 +48,8 @@ final class CncfLauncher(
         _run_runtime(runtime, config)
       case repository: CncfCommand.Repository =>
         _run_repository(repository)
+      case supervisor: CncfCommand.Supervisor =>
+        _run_supervisor(supervisor)
       case install: CncfCommand.InstallCli =>
         _run_install_cli(install, configfiles, cncfconfigfiles)
       case execute: CncfCommand.Execute =>
@@ -71,6 +74,16 @@ final class CncfLauncher(
         0
     }
   }
+
+  private def _run_supervisor(command: CncfCommand.Supervisor): Int =
+    command match {
+      case CncfCommand.Supervisor.Serve =>
+        LifecycleSupervisorDaemonConfiguration.resolve(paths).fold(code => throw CncfException(code), { configuration =>
+          environment.get(configuration.tokenEnv).filter(_.nonEmpty).fold(
+            throw CncfException(LifecycleSupervisorDaemonConfiguration.CREDENTIAL_UNAVAILABLE)
+          )(token => supervisorhost.serve(configuration, token, paths))
+        })
+    }
 
   private def _delegate_launcher_dev_dir(
     config: LauncherConfig,

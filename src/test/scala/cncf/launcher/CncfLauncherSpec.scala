@@ -10,6 +10,7 @@ import java.nio.file.{Files, Path}
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.jdk.CollectionConverters.*
+import scala.util.Try
 import io.circe.syntax.*
 import LifecycleSupervisorProtocol.given
 import LifecycleSupervisorStateStore.given
@@ -118,6 +119,10 @@ object CncfLauncherSpec {
     spec.lifecycleSupervisorRejectsUnavailablePortBeforeStartOrRestart()
     spec.lifecycleSupervisorReleasesOwnershipWhenRestartReplacementFails()
     spec.lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted()
+    spec.lifecycleSupervisorDaemonUsesPrivateLoopbackConfiguration()
+    spec.lifecycleSupervisorDaemonRejectsUnsafeConfigurationOrCredential()
+    spec.lifecycleSupervisorDaemonHostBindsLoopbackUntilInterrupted()
+    spec.lifecycleSupervisorDaemonClosesListenerWhenShutdownHookRegistrationFails()
     spec.latestRuntimeIsConcrete()
     spec.noCncfRuntimeLibraryDependencies()
     println("CncfLauncherSpec: OK")
@@ -238,6 +243,22 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       "fail closed after it cannot persist a stopped-child restart failure" in {
         lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted()
+      }
+
+      "start the foreground daemon from private loopback configuration" in {
+        lifecycleSupervisorDaemonUsesPrivateLoopbackConfiguration()
+      }
+
+      "reject unsafe daemon configuration and a missing credential before host startup" in {
+        lifecycleSupervisorDaemonRejectsUnsafeConfigurationOrCredential()
+      }
+
+      "bind the foreground daemon host to loopback until interruption" in {
+        lifecycleSupervisorDaemonHostBindsLoopbackUntilInterrupted()
+      }
+
+      "close its listener when foreground shutdown-hook registration fails" in {
+        lifecycleSupervisorDaemonClosesListenerWhenShutdownHookRegistrationFails()
       }
     }
 
@@ -2778,6 +2799,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
     _write(paths.supervisorConfig,
       s"""schema: cncf.launcher.supervisor.v1
+         |supervisor:
+         |  id: local-supervisor
+         |  port: "18014"
+         |  token-env: CNCF_LIFECYCLE_SUPERVISOR_TOKEN
          |profiles:
          |  development-directory:
          |    textus-control-center: ${project.toAbsolutePath}
@@ -3265,6 +3290,110 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     } finally server.stop(0)
   }
 
+  def lifecycleSupervisorDaemonUsesPrivateLoopbackConfiguration(): Unit = _with_temp_paths { paths =>
+    Given("a private supervisor configuration and its environment-only credential")
+    _write(paths.supervisorConfig, _supervisor_yaml("local-supervisor", 18014, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN"))
+    val host = FakeLifecycleSupervisorDaemonHost()
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      FakeInvoker(),
+      environment = Map("CNCF_LIFECYCLE_SUPERVISOR_TOKEN" -> "private-token"),
+      supervisorhost = host
+    )
+
+    When("the launcher starts the foreground supervisor command")
+    val code = launcher.run(Vector("launcher", "supervisor", "serve"))
+
+    Then("it delegates only validated configuration and the resolved credential without loading a CNCF runtime")
+    code shouldBe 0
+    CncfCommandParser.parse(Vector("launcher", "supervisor", "serve")) shouldBe CncfCommand.Supervisor.Serve
+    host.configurations shouldBe Vector(LifecycleSupervisorDaemonConfiguration("local-supervisor", 18014, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN"))
+    host.tokens shouldBe Vector("private-token")
+    host.paths shouldBe Vector(paths)
+  }
+
+  def lifecycleSupervisorDaemonRejectsUnsafeConfigurationOrCredential(): Unit = _with_temp_paths { paths =>
+    Given("a malformed supervisor configuration and a valid configuration without its credential")
+    _write(paths.supervisorConfig, _supervisor_yaml("local-supervisor", 0, "not-safe") + "supervisor.token: private-token\n")
+    val invalid = LifecycleSupervisorDaemonConfiguration.resolve(paths)
+    val host = FakeLifecycleSupervisorDaemonHost()
+    val invalidlauncher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), supervisorhost = host)
+
+    When("the launcher resolves the malformed configuration")
+    val invaliderror = intercept[CncfException] {
+      invalidlauncher.run(Vector("launcher", "supervisor", "serve"))
+    }
+    _write(paths.supervisorConfig, _supervisor_yaml("local-supervisor", 18014, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN"))
+    val missingcredential = intercept[CncfException] {
+      invalidlauncher.run(Vector("launcher", "supervisor", "serve"))
+    }
+
+    Then("it fails before starting a host and never accepts a token value in the file")
+    invalid shouldBe Left(LifecycleSupervisorDaemonConfiguration.CONFIGURATION_UNAVAILABLE)
+    invaliderror.getMessage shouldBe LifecycleSupervisorDaemonConfiguration.CONFIGURATION_UNAVAILABLE
+    missingcredential.getMessage shouldBe LifecycleSupervisorDaemonConfiguration.CREDENTIAL_UNAVAILABLE
+    host.configurations shouldBe empty
+  }
+
+  def lifecycleSupervisorDaemonHostBindsLoopbackUntilInterrupted(): Unit = _with_temp_paths { paths =>
+    Given("a foreground daemon host with an available loopback port")
+    val listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress)
+    val port = listener.getLocalPort
+    listener.close()
+    val configuration = LifecycleSupervisorDaemonConfiguration("local-supervisor", port, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN")
+    var result = Option.empty[Either[Throwable, Int]]
+    val daemon = new Thread(() => {
+      result = Some(Try(LifecycleSupervisorDaemonHost.System.serve(configuration, "private-token", paths)).toEither)
+    })
+
+    When("the daemon host starts and is then interrupted")
+    daemon.start()
+    var status = Option.empty[Int]
+    var attempts = 0
+    while (status.isEmpty && attempts < 50) {
+      status = Try {
+        val connection = URI(s"http://127.0.0.1:$port/v1/lifecycle-requests").toURL.openConnection().asInstanceOf[HttpURLConnection]
+        connection.setConnectTimeout(100)
+        connection.setReadTimeout(100)
+        try connection.getResponseCode finally connection.disconnect()
+      }.toOption
+      if (status.isEmpty) Thread.sleep(20)
+      attempts += 1
+    }
+    daemon.interrupt()
+    daemon.join(5000)
+
+    Then("the private HTTP listener is reachable only through loopback and shuts down with its foreground thread")
+    status shouldBe Some(400)
+    daemon.isAlive shouldBe false
+    result shouldBe Some(Right(0))
+  }
+
+  def lifecycleSupervisorDaemonClosesListenerWhenShutdownHookRegistrationFails(): Unit = _with_temp_paths { paths =>
+    Given("a foreground host whose shutdown hook cannot be registered")
+    val listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress)
+    val port = listener.getLocalPort
+    listener.close()
+    val configuration = LifecycleSupervisorDaemonConfiguration("local-supervisor", port, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN")
+    val host = new LifecycleSupervisorForegroundDaemonHost(new LifecycleSupervisorShutdownHooks {
+      def add(hook: Thread): Unit = throw new IllegalStateException("shutdown unavailable")
+      def remove(hook: Thread): Boolean = false
+    })
+
+    When("the host fails after binding but before its foreground loop is available")
+    val error = intercept[IllegalStateException] {
+      host.serve(configuration, "private-token", paths)
+    }
+    val rebound = new ServerSocket()
+    try {
+      rebound.bind(new InetSocketAddress(InetAddress.getLoopbackAddress, port))
+    } finally rebound.close()
+
+    Then("it releases the loopback port and preserves the unrecoverable hook failure")
+    error.getMessage shouldBe "shutdown unavailable"
+  }
+
   def noCncfRuntimeLibraryDependencies(): Unit = {
     val build = Files.readString(Path.of("build.sbt"))
     build should not include "goldenport-cncf"
@@ -3463,6 +3592,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
        |  kind: $kind
        |""".stripMargin
 
+  private def _supervisor_yaml(supervisorid: String, port: Int, tokenenv: String): String =
+    s"""schema: cncf.launcher.supervisor.v1
+       |supervisor:
+       |  id: $supervisorid
+       |  port: "$port"
+       |  token-env: $tokenenv
+       |""".stripMargin
+
   private def _component_repository_index(kind: String, artifactid: String, version: String): String =
     s"""{
        |  "schemaVersion": "cncf.component-repository-index.v1",
@@ -3537,6 +3674,23 @@ final class FakeInvoker extends CncfInvoker {
 
 object FakeInvoker {
   def apply(): FakeInvoker = new FakeInvoker()
+}
+
+final class FakeLifecycleSupervisorDaemonHost extends LifecycleSupervisorDaemonHost {
+  var configurations: Vector[LifecycleSupervisorDaemonConfiguration] = Vector.empty
+  var tokens: Vector[String] = Vector.empty
+  var paths: Vector[LauncherPaths] = Vector.empty
+
+  def serve(configuration: LifecycleSupervisorDaemonConfiguration, token: String, launcherpaths: LauncherPaths): Int = {
+    configurations :+= configuration
+    tokens :+= token
+    paths :+= launcherpaths
+    0
+  }
+}
+
+object FakeLifecycleSupervisorDaemonHost {
+  def apply(): FakeLifecycleSupervisorDaemonHost = new FakeLifecycleSupervisorDaemonHost()
 }
 
 final class FakeCncfTextusControlCenterRegistrationReporter extends CncfTextusControlCenterRegistrationReporter {
