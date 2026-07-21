@@ -35,12 +35,14 @@ final case class LifecycleSupervisorState(
       case Some(record) => this -> record.result
       case None =>
         val result = request.action match {
-          case LifecycleAction.Start if instanceid.isDefined => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, instanceid, Some(now), None)
-          case LifecycleAction.Stop | LifecycleAction.Restart if ownedInstances.contains(request.artifactId) => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, ownedInstances.get(request.artifactId), Some(now), None)
+          case LifecycleAction.Start if instanceid.isDefined && !ownedInstances.contains(request.artifactId) => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, instanceid, Some(now), None)
+          case LifecycleAction.Stop if ownedInstances.contains(request.artifactId) => LifecycleSupervisorResult(request.requestId, "stopped", None, None, supervisorId, ownedInstances.get(request.artifactId), Some(now), Some(now))
+          case LifecycleAction.Restart if ownedInstances.contains(request.artifactId) && instanceid.isDefined => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, instanceid, Some(now), None)
           case _ => LifecycleSupervisorProtocol.rejected(request, supervisorId, "supervisor-ownership-unavailable")
         }
         val nextinstances = result.state match {
-          case "accepted" if request.action == LifecycleAction.Start => instanceid.fold(ownedInstances)(value => ownedInstances.updated(request.artifactId, value))
+          case "accepted" if request.action == LifecycleAction.Start || request.action == LifecycleAction.Restart => instanceid.fold(ownedInstances)(value => ownedInstances.updated(request.artifactId, value))
+          case "stopped" => ownedInstances.removed(request.artifactId)
           case _ => ownedInstances
         }
         copy(requests = requests.updated(key, LifecycleSupervisorRequestRecord(request, result)), ownedInstances = nextinstances) -> result

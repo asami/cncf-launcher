@@ -110,6 +110,10 @@ object CncfLauncherSpec {
     spec.lifecycleSupervisorProjectsProfileResolutionToHttp()
     spec.lifecycleSupervisorRetainsRejectedRequestAcrossRestart()
     spec.lifecycleSupervisorRejectsCorruptRequestIdentity()
+    spec.lifecycleSupervisorControlsOwnedChildOnly()
+    spec.lifecycleSupervisorRejectsPersistedOwnershipWithoutChildHandle()
+    spec.lifecycleSupervisorRejectsDuplicateOrDeadChildStart()
+    spec.lifecycleSupervisorStopsChildWhenStatePersistenceFails()
     spec.latestRuntimeIsConcrete()
     spec.noCncfRuntimeLibraryDependencies()
     println("CncfLauncherSpec: OK")
@@ -198,6 +202,22 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       "reject a persisted ledger with ambiguous or mismatched request identity" in {
         lifecycleSupervisorRejectsCorruptRequestIdentity()
+      }
+
+      "control only a child created by this supervisor instance" in {
+        lifecycleSupervisorControlsOwnedChildOnly()
+      }
+
+      "reject a persisted ownership record after losing its in-memory child handle" in {
+        lifecycleSupervisorRejectsPersistedOwnershipWithoutChildHandle()
+      }
+
+      "reject duplicate and non-running child starts without retaining an orphan" in {
+        lifecycleSupervisorRejectsDuplicateOrDeadChildStart()
+      }
+
+      "stop a newly spawned child when its lifecycle state cannot be persisted" in {
+        lifecycleSupervisorStopsChildWhenStatePersistenceFails()
       }
     }
 
@@ -2862,6 +2882,162 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     loaded shouldBe Left(LifecycleSupervisorStateStore.STATE_UNAVAILABLE)
   }
 
+  def lifecycleSupervisorControlsOwnedChildOnly(): Unit = _with_temp_paths { paths =>
+    Given("a configured profile and a supervisor-local child factory")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    var started = Vector.empty[LifecycleSupervisorChild]
+    val factory = new LifecycleSupervisorChildFactory {
+      def start(artifactId: String) = {
+        val child = new LifecycleSupervisorChild {
+          val instanceId = s"instance-${started.size + 1}"
+          var alive = true
+          def isAlive = alive
+          def stop() = { alive = false; true }
+        }
+        started = started :+ child
+        Right(child)
+      }
+    }
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), factory).start(0)
+    try {
+      When("start, restart, and stop requests address the supervisor-created child")
+      val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
+      val startresponse = _post_lifecycle_request(endpoint, "textus-control-center", "start-request", "start-key")
+      val restarted = _post_lifecycle_request(endpoint, "textus-control-center", "restart-request", "restart-key", "restart")
+      val stopped = _post_lifecycle_request(endpoint, "textus-control-center", "stop-request", "stop-key", "stop")
+
+      Then("the supervisor replaces and stops only its retained child handles")
+      startresponse should include("instance-1")
+      restarted should include("instance-2")
+      stopped should include("stopped")
+      started.map(_.isAlive) shouldBe Vector(false, false)
+    } finally server.stop(0)
+  }
+
+  def lifecycleSupervisorRejectsPersistedOwnershipWithoutChildHandle(): Unit = _with_temp_paths { paths =>
+    Given("a persisted owned-instance record from a prior supervisor process")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    val child = new LifecycleSupervisorChild {
+      val instanceId = "prior-instance"
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    val factory = new LifecycleSupervisorChildFactory {
+      def start(artifactId: String) = Right(child)
+    }
+    val store = LifecycleSupervisorStateStore(paths, "local-supervisor")
+    val first = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(store), factory).start(0)
+    try {
+      When("a replacement supervisor receives stop for the persisted instance")
+      val firstendpoint = s"http://127.0.0.1:${first.getAddress.getPort}/v1/lifecycle-requests"
+      _post_lifecycle_request(firstendpoint, "textus-control-center", "start-request", "start-key") should include("prior-instance")
+      first.stop(0)
+      val replacement = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(store), factory).start(0)
+      try {
+        val endpoint = s"http://127.0.0.1:${replacement.getAddress.getPort}/v1/lifecycle-requests"
+        val result = _post_lifecycle_request(endpoint, "textus-control-center", "stop-request", "stop-key", "stop")
+
+        Then("it refuses to signal a process for which it retained no local handle")
+        result should include("supervisor-ownership-unavailable")
+        child.isAlive shouldBe true
+      } finally replacement.stop(0)
+    } finally first.stop(0)
+  }
+
+  def lifecycleSupervisorRejectsDuplicateOrDeadChildStart(): Unit = _with_temp_paths { paths =>
+    Given("a configured profile and child factories for running and already-dead children")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    var starts = 0
+    val runningchild = new LifecycleSupervisorChild {
+      val instanceId = "running-instance"
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    var deadchildstopped = false
+    val deadchild = new LifecycleSupervisorChild {
+      val instanceId = "dead-instance"
+      def isAlive = false
+      def stop() = { deadchildstopped = true; true }
+    }
+    val factory = new LifecycleSupervisorChildFactory {
+      def start(artifactId: String) = {
+        starts += 1
+        Right(if (starts == 1) runningchild else deadchild)
+      }
+    }
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), factory).start(0)
+    try {
+      When("a different start request arrives while an owned child is retained")
+      val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
+      _post_lifecycle_request(endpoint, "textus-control-center", "first-start", "first-key") should include("running-instance")
+      val duplicate = _post_lifecycle_request(endpoint, "textus-control-center", "second-start", "second-key")
+
+      Then("it does not create a replacement child")
+      duplicate should include("supervisor-ownership-unavailable")
+      starts shouldBe 1
+      runningchild.isAlive shouldBe true
+
+      When("the retained child stops and a subsequent factory result is already dead")
+      _post_lifecycle_request(endpoint, "textus-control-center", "stop-request", "stop-key", "stop") should include("stopped")
+      val dead = _post_lifecycle_request(endpoint, "textus-control-center", "dead-start", "dead-key")
+
+      Then("it rejects and cleans up the non-running child")
+      dead should include("supervisor-execution-unavailable")
+      deadchildstopped shouldBe true
+    } finally server.stop(0)
+  }
+
+  def lifecycleSupervisorStopsChildWhenStatePersistenceFails(): Unit = _with_temp_paths { paths =>
+    Given("a configured profile whose state-file target is an existing directory")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    _write(paths.supervisorConfig, s"""schema: cncf.launcher.supervisor.v1
+      |profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    Files.createDirectories(paths.supervisorState)
+    val child = new LifecycleSupervisorChild {
+      val instanceId = "unpersisted-instance"
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    val factory = new LifecycleSupervisorChildFactory {
+      def start(artifactId: String) = Right(child)
+    }
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor")), factory).start(0)
+    try {
+      When("a start request cannot durably record its new child handle")
+      val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
+      val response = _post_lifecycle_request(endpoint, "textus-control-center", "unpersisted-start", "unpersisted-key")
+
+      Then("the request is rejected and the child is compensatingly stopped")
+      response should include(LifecycleSupervisorStateStore.STATE_UNAVAILABLE)
+      child.isAlive shouldBe false
+    } finally server.stop(0)
+  }
+
   def noCncfRuntimeLibraryDependencies(): Unit = {
     val build = Files.readString(Path.of("build.sbt"))
     build should not include "goldenport-cncf"
@@ -2876,10 +3052,11 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     (code, out.toString)
   }
 
-  private def _post_lifecycle_request(endpoint: String, artifactid: String, requestid: String, idempotencykey: String): String = {
+  private def _post_lifecycle_request(endpoint: String, artifactid: String, requestid: String, idempotencykey: String, action: String = "start"): String = {
     val connection = URI(endpoint).toURL.openConnection().asInstanceOf[HttpURLConnection]
+    val deadline = java.time.Instant.now().plusSeconds(60)
     val body =
-      s"""{"requestId":"$requestid","idempotencyKey":"$idempotencykey","artifactId":"$artifactid","action":"start","operatorSubjectId":"test-operator","deadlineAt":"2026-07-22T00:00:30Z"}"""
+      s"""{"requestId":"$requestid","idempotencyKey":"$idempotencykey","artifactId":"$artifactid","action":"$action","operatorSubjectId":"test-operator","deadlineAt":"$deadline"}"""
     connection.setRequestMethod("POST")
     connection.setRequestProperty("Authorization", "Bearer test-token")
     connection.setRequestProperty("Content-Type", "application/json")
