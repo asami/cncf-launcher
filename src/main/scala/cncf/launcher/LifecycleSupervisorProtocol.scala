@@ -42,11 +42,18 @@ case class LifecycleSupervisorResult(
   completedAt: Option[Instant]
 )
 
+case class LifecycleSupervisorRequestRecord(
+  request: LifecycleSupervisorRequest,
+  result: LifecycleSupervisorResult
+)
+
 object LifecycleSupervisorProtocol {
   given Encoder[LifecycleSupervisorRequest] = deriveEncoder
   given Decoder[LifecycleSupervisorRequest] = deriveDecoder
   given Encoder[LifecycleSupervisorResult] = deriveEncoder
   given Decoder[LifecycleSupervisorResult] = deriveDecoder
+  given Encoder[LifecycleSupervisorRequestRecord] = deriveEncoder
+  given Decoder[LifecycleSupervisorRequestRecord] = deriveDecoder
 
   def rejected(
     request: LifecycleSupervisorRequest,

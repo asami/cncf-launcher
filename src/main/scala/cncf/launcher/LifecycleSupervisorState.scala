@@ -7,23 +7,32 @@ import java.time.Instant
  */
 final case class LifecycleSupervisorState(
   supervisorId: String,
-  requests: Map[(String, LifecycleAction, String), LifecycleSupervisorResult] = Map.empty,
+  requests: Map[(String, LifecycleAction, String), LifecycleSupervisorRequestRecord] = Map.empty,
   ownedInstances: Map[String, String] = Map.empty
 ) {
+  def existing(request: LifecycleSupervisorRequest): Option[LifecycleSupervisorResult] =
+    requests.get(_key(request)).map(_.result)
+
+  def lookup(requestid: String): Option[LifecycleSupervisorResult] =
+    requests.valuesIterator.map(_.result).find(_.requestId == requestid)
+
+  def records: Vector[LifecycleSupervisorRequestRecord] =
+    requests.values.toVector.sortBy(_.request.requestId)
+
   def reject(request: LifecycleSupervisorRequest, code: String, now: Instant): (LifecycleSupervisorState, LifecycleSupervisorResult) = {
-    val key = (request.artifactId, request.action, request.idempotencyKey)
+    val key = _key(request)
     requests.get(key) match {
-      case Some(result) => this -> result
+      case Some(record) => this -> record.result
       case None =>
         val result = LifecycleSupervisorProtocol.rejected(request, supervisorId, code, now)
-        copy(requests = requests.updated(key, result)) -> result
+        copy(requests = requests.updated(key, LifecycleSupervisorRequestRecord(request, result))) -> result
     }
   }
 
   def submit(request: LifecycleSupervisorRequest, instanceid: Option[String], now: Instant): (LifecycleSupervisorState, LifecycleSupervisorResult) = {
-    val key = (request.artifactId, request.action, request.idempotencyKey)
+    val key = _key(request)
     requests.get(key) match {
-      case Some(result) => this -> result
+      case Some(record) => this -> record.result
       case None =>
         val result = request.action match {
           case LifecycleAction.Start if instanceid.isDefined => LifecycleSupervisorResult(request.requestId, "accepted", None, None, supervisorId, instanceid, Some(now), None)
@@ -34,7 +43,10 @@ final case class LifecycleSupervisorState(
           case "accepted" if request.action == LifecycleAction.Start => instanceid.fold(ownedInstances)(value => ownedInstances.updated(request.artifactId, value))
           case _ => ownedInstances
         }
-        copy(requests = requests.updated(key, result), ownedInstances = nextinstances) -> result
+        copy(requests = requests.updated(key, LifecycleSupervisorRequestRecord(request, result)), ownedInstances = nextinstances) -> result
     }
   }
+
+  private def _key(request: LifecycleSupervisorRequest): (String, LifecycleAction, String) =
+    (request.artifactId, request.action, request.idempotencyKey)
 }

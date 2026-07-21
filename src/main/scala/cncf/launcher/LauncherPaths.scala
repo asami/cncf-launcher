@@ -14,6 +14,7 @@ final case class LauncherPaths(
   val cncfHome: Path = home.resolve(".cncf")
   val globalConfig: Path = cncfHome.resolve("launcher.yaml")
   val supervisorConfig: Path = cncfHome.resolve("launcher").resolve("supervisor.yaml")
+  val supervisorState: Path = cncfHome.resolve("launcher").resolve("supervisor-state.json")
   val projectConfig: Path = cwd.resolve("conf").resolve("cncf").resolve("launcher.yaml")
   val projectLocalConfig: Path = cwd.resolve(".cncf").resolve("launcher.yaml")
   val globalRuntimeConfig: Path = cncfHome.resolve("config.yaml")

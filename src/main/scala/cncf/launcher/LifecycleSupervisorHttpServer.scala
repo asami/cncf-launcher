@@ -16,9 +16,13 @@ import LifecycleSupervisorProtocol.given
 final class LifecycleSupervisorHttpServer(
   supervisorid: String,
   token: String,
-  profiles: LifecycleSupervisorProfileResolver = LifecycleSupervisorProfileResolver(LauncherPaths())
+  profiles: LifecycleSupervisorProfileResolver = LifecycleSupervisorProfileResolver(LauncherPaths()),
+  store: Option[LifecycleSupervisorStateStore] = None
 ) {
-  private val _state = new AtomicReference(LifecycleSupervisorState(supervisorid))
+  private val _store = store.getOrElse(LifecycleSupervisorStateStore(LauncherPaths(), supervisorid))
+  private val _loaded = _store.load()
+  private val _state = new AtomicReference(_loaded.getOrElse(LifecycleSupervisorState(supervisorid)))
+  private val _lock = new Object
 
   def start(port: Int): HttpServer = {
     val server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0)
@@ -30,7 +34,8 @@ final class LifecycleSupervisorHttpServer(
   private val _handler = new HttpHandler {
     def handle(exchange: HttpExchange): Unit = {
       val response =
-        if (exchange.getRequestMethod != "POST") None
+        if (exchange.getRequestMethod == "GET") _lookup(exchange)
+        else if (exchange.getRequestMethod != "POST") None
         else if (!Option(exchange.getRequestHeaders.getFirst("Authorization")).contains(s"Bearer $token")) None
         else decode[LifecycleSupervisorRequest](new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)).toOption.map { request =>
           val result = _submit(request)
@@ -44,19 +49,40 @@ final class LifecycleSupervisorHttpServer(
   }
 
   private def _submit(request: LifecycleSupervisorRequest): LifecycleSupervisorResult = {
-    val code = profiles.resolve(request.artifactId).fold(identity, _ => "supervisor-execution-unavailable")
-    _reject(request, code)
+    if (_loaded.isLeft)
+      LifecycleSupervisorProtocol.rejected(request, supervisorid, LifecycleSupervisorStateStore.STATE_UNAVAILABLE)
+    else if (request.deadlineAt.isBefore(Instant.now()))
+      _reject(request, "supervisor-request-timed-out")
+    else {
+      val code = profiles.resolve(request.artifactId).fold(identity, _ => "supervisor-execution-unavailable")
+      _reject(request, code)
+    }
   }
 
   private def _reject(request: LifecycleSupervisorRequest, code: String): LifecycleSupervisorResult = {
-    var next: LifecycleSupervisorResult = LifecycleSupervisorProtocol.rejected(request, supervisorid, code)
-    _state.updateAndGet { state =>
-      val (updated, result) = state.reject(request, code, Instant.now())
-      next = result
-      updated
+    _lock.synchronized {
+      _state.get.existing(request).getOrElse {
+        val (updated, result) = _state.get.reject(request, code, Instant.now())
+        _store.save(updated) match {
+          case Right(_) =>
+            _state.set(updated)
+            result
+          case Left(error) => LifecycleSupervisorProtocol.rejected(request, supervisorid, error)
+        }
+      }
     }
-    next
   }
+
+  private def _lookup(exchange: HttpExchange): Option[String] =
+    if (!Option(exchange.getRequestHeaders.getFirst("Authorization")).contains(s"Bearer $token"))
+      None
+    else {
+      val prefix = "/v1/lifecycle-requests/"
+      val path = exchange.getRequestURI.getPath
+      Option.when(path.startsWith(prefix) && path.drop(prefix.length).nonEmpty)(path.drop(prefix.length)).flatMap { requestid =>
+        _state.get.lookup(requestid).map(_.asJson.noSpaces)
+      }
+    }
 
   private def _write(exchange: HttpExchange, status: Int, body: String): Unit = {
     val bytes = body.getBytes(StandardCharsets.UTF_8)

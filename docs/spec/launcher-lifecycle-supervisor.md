@@ -31,6 +31,18 @@ The profile file is launcher-private. It is neither a Control Center setting
 nor a lifecycle request field, and directory values are never returned through
 the supervisor HTTP projection.
 
+## Durable Request Records
+
+The supervisor persists its request/idempotency and owned-instance records in
+`~/.cncf/launcher/supervisor-state.json`. A record contains only the protocol
+request and its safe result; it contains no credential, directory, command, or
+PID. Records are written atomically before the HTTP response is returned.
+
+`GET /v1/lifecycle-requests/{requestId}` returns the same safe result to an
+authenticated local caller. A supervisor restart reloads completed/rejected
+records for retry and reconciliation, but it never reconstructs process
+ownership from a persisted PID, port, command line, or process-table search.
+
 The supervisor accepts authenticated loopback `POST /v1/lifecycle-requests`
 requests with `requestId`, `idempotencyKey`, `artifactId`, `action`,
 `operatorSubjectId`, and `deadlineAt`. It returns one stable record containing

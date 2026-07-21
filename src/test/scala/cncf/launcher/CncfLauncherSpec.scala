@@ -10,6 +10,9 @@ import java.nio.file.{Files, Path}
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.jdk.CollectionConverters.*
+import io.circe.syntax.*
+import LifecycleSupervisorProtocol.given
+import LifecycleSupervisorStateStore.given
 
 /*
  * @since   May. 17, 2026
@@ -105,6 +108,8 @@ object CncfLauncherSpec {
     spec.lifecycleSupervisorResolvesExplicitDevelopmentProfile()
     spec.lifecycleSupervisorRejectsMalformedDevelopmentProfile()
     spec.lifecycleSupervisorProjectsProfileResolutionToHttp()
+    spec.lifecycleSupervisorRetainsRejectedRequestAcrossRestart()
+    spec.lifecycleSupervisorRejectsCorruptRequestIdentity()
     spec.latestRuntimeIsConcrete()
     spec.noCncfRuntimeLibraryDependencies()
     println("CncfLauncherSpec: OK")
@@ -185,6 +190,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       "project resolved and unavailable profiles through the private supervisor HTTP boundary" in {
         lifecycleSupervisorProjectsProfileResolutionToHttp()
+      }
+
+      "retain a safe lifecycle result for retry and lookup after supervisor restart" in {
+        lifecycleSupervisorRetainsRejectedRequestAcrossRestart()
+      }
+
+      "reject a persisted ledger with ambiguous or mismatched request identity" in {
+        lifecycleSupervisorRejectsCorruptRequestIdentity()
       }
     }
 
@@ -2804,6 +2817,51 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     }
   }
 
+  def lifecycleSupervisorRetainsRejectedRequestAcrossRestart(): Unit = _with_temp_paths { paths =>
+    Given("a supervisor request that cannot resolve a configured launch profile")
+    val requestid = "retained-request"
+    val first = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
+
+    try {
+      When("the supervisor restarts after recording its safe rejection")
+      val firstendpoint = s"http://127.0.0.1:${first.getAddress.getPort}/v1/lifecycle-requests"
+      val response = _post_lifecycle_request(firstendpoint, "missing-component", requestid, "retained-key")
+      first.stop(0)
+      val restarted = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
+      try {
+        val endpoint = s"http://127.0.0.1:${restarted.getAddress.getPort}/v1/lifecycle-requests"
+        val lookup = _get_lifecycle_request(endpoint, requestid)
+        val retry = _post_lifecycle_request(endpoint, "missing-component", "different-request", "retained-key")
+
+        Then("lookup and retry retain the original safe result without inferring process ownership")
+        response should include(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+        lookup should include(requestid)
+        retry should include(requestid)
+        retry should include(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+      } finally {
+        restarted.stop(0)
+      }
+    } finally {
+      first.stop(0)
+    }
+  }
+
+  def lifecycleSupervisorRejectsCorruptRequestIdentity(): Unit = _with_temp_paths { paths =>
+    Given("a persisted supervisor ledger with duplicated and mismatched request identity")
+    val request = LifecycleSupervisorRequest("request-a", "key-a", "component-a", LifecycleAction.Start, "operator", java.time.Instant.parse("2026-07-22T00:00:30Z"))
+    val result = LifecycleSupervisorProtocol.rejected(request, "local-supervisor", "supervisor-launch-profile-unavailable")
+    val mismatched = LifecycleSupervisorRequestRecord(request, result.copy(requestId = "other-request"))
+    val duplicate = LifecycleSupervisorRequestRecord(request.copy(idempotencyKey = "key-b"), result)
+    val snapshot = LifecycleSupervisorStateSnapshot(LifecycleSupervisorStateStore.SCHEMA_VERSION, "local-supervisor", Vector(mismatched, duplicate), Map.empty)
+    _write(paths.supervisorState, snapshot.asJson.noSpaces)
+
+    When("the supervisor loads the private state ledger")
+    val loaded = LifecycleSupervisorStateStore(paths, "local-supervisor").load()
+
+    Then("it refuses ambiguous request correlation before serving lookup or retry")
+    loaded shouldBe Left(LifecycleSupervisorStateStore.STATE_UNAVAILABLE)
+  }
+
   def noCncfRuntimeLibraryDependencies(): Unit = {
     val build = Files.readString(Path.of("build.sbt"))
     build should not include "goldenport-cncf"
@@ -2827,6 +2885,17 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     connection.setRequestProperty("Content-Type", "application/json")
     connection.setDoOutput(true)
     connection.getOutputStream.write(body.getBytes(StandardCharsets.UTF_8))
+    try {
+      new String(connection.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  private def _get_lifecycle_request(endpoint: String, requestid: String): String = {
+    val connection = URI(s"$endpoint/$requestid").toURL.openConnection().asInstanceOf[HttpURLConnection]
+    connection.setRequestMethod("GET")
+    connection.setRequestProperty("Authorization", "Bearer test-token")
     try {
       new String(connection.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
     } finally {
