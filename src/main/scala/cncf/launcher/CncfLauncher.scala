@@ -360,7 +360,7 @@ final class CncfLauncher(
     )
     Runtime.getRuntime.addShutdownHook(shutdownhook)
     try {
-      cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ command.args)
+      cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ _runtime_command_args(command.args))
     } finally {
       scala.util.Try(Runtime.getRuntime.removeShutdownHook(shutdownhook))
       session.close()
@@ -390,7 +390,7 @@ final class CncfLauncher(
             registrationreporter.start(
               configuration,
               CncfTextusControlCenterRegistrationReport(
-                instanceId = java.util.UUID.randomUUID().toString,
+                instanceId = _registration_instance_id(command.args).getOrElse(java.util.UUID.randomUUID().toString),
                 target = target.name,
                 artifactId = target.artifactId,
                 executionMode = target.executionMode,
@@ -410,6 +410,15 @@ final class CncfLauncher(
         case None => CncfTextusControlCenterRegistrationSession.noop
       }
     }
+
+  private def _registration_instance_id(args: Vector[String]): Option[String] =
+    args.collectFirst {
+      case value if value.startsWith("--textus.control-center.registration-instance-id=") =>
+        value.stripPrefix("--textus.control-center.registration-instance-id=").trim
+    }.filter(_.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+
+  private def _runtime_command_args(args: Vector[String]): Vector[String] =
+    args.filterNot(_.startsWith("--textus.control-center.registration-instance-id="))
 
   private final case class RegistrationTarget(
     name: String,

@@ -4,6 +4,7 @@ import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 import io.circe.parser.decode
@@ -79,7 +80,9 @@ final class LifecycleSupervisorHttpServer(
     profile: LifecycleSupervisorLaunchProfile,
     owned: Option[LifecycleSupervisorChild]
   ): LifecycleSupervisorResult =
-    children.preflight(profile, owned).fold(code => _reject(request, code), _ => children.start(profile).fold(code => _reject(request, code), child => _accept_start(request, child)))
+    children.preflight(profile, owned).fold(code => _reject(request, code), _ =>
+      children.start(profile, LifecycleSupervisorChildCorrelation(UUID.randomUUID().toString)).fold(code => _reject(request, code), child => _accept_start(request, child))
+    )
 
   private def _accept_start(request: LifecycleSupervisorRequest, child: LifecycleSupervisorChild, releaseownership: Boolean = false): LifecycleSupervisorResult = {
     if (!child.isAlive) {

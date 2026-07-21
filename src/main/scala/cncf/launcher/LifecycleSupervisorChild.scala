@@ -21,7 +21,12 @@ trait LifecycleSupervisorChild {
 trait LifecycleSupervisorChildFactory {
   def preflight(profile: LifecycleSupervisorLaunchProfile, owned: Option[LifecycleSupervisorChild]): Either[String, Unit] = Right(())
   def start(profile: LifecycleSupervisorLaunchProfile): Either[String, LifecycleSupervisorChild]
+  def start(profile: LifecycleSupervisorLaunchProfile, correlation: LifecycleSupervisorChildCorrelation): Either[String, LifecycleSupervisorChild] = start(profile)
 }
+
+final case class LifecycleSupervisorChildCorrelation(
+  instanceId: String
+)
 
 object LifecycleSupervisorChildFactory {
   object Unavailable extends LifecycleSupervisorChildFactory {
@@ -107,8 +112,23 @@ final class LifecycleSupervisorDevelopmentDirectoryChildFactory(
   def start(profile: LifecycleSupervisorLaunchProfile): Either[String, LifecycleSupervisorChild] =
     runner.start(_command(profile), profile.developmentDirectory, profile.defaultPort)
 
-  private def _command(profile: LifecycleSupervisorLaunchProfile): Vector[String] =
-    Vector("cncf", profile.developmentDirectory.toString, "server", s"--textus.server.port=${profile.defaultPort}")
+  override def start(profile: LifecycleSupervisorLaunchProfile, correlation: LifecycleSupervisorChildCorrelation): Either[String, LifecycleSupervisorChild] =
+    runner.start(_command(profile, Some(correlation)), profile.developmentDirectory, profile.defaultPort).map { child =>
+      LifecycleSupervisorCorrelatedChild(correlation.instanceId, child)
+    }
+
+  private def _command(profile: LifecycleSupervisorLaunchProfile, correlation: Option[LifecycleSupervisorChildCorrelation] = None): Vector[String] =
+    Vector("cncf", profile.developmentDirectory.toString, "server", s"--textus.server.port=${profile.defaultPort}") ++
+      correlation.map(value => s"--textus.control-center.registration-instance-id=${value.instanceId}").toVector
+}
+
+private final case class LifecycleSupervisorCorrelatedChild(
+  instanceId: String,
+  child: LifecycleSupervisorChild
+) extends LifecycleSupervisorChild {
+  override val port: Int = child.port
+  def isAlive: Boolean = child.isAlive
+  def stop(): Boolean = child.stop()
 }
 
 object LifecycleSupervisorDevelopmentDirectoryChildFactory {

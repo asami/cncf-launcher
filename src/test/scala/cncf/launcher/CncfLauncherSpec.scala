@@ -1538,6 +1538,16 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val outagecode = outagelauncher.run(Vector("textus-registration:0.1.0", "server"))
     _assert_equals(outagecode, 0)
     outageinvoker.lastArgs.head shouldBe "server"
+
+    When("a supervisor-created server command supplies its opaque instance identity")
+    val correlatedinstanceid = "30303030-3030-4030-8030-303030303030"
+    val correlatedcode = launcher.run(Vector("server", s"--textus.control-center.registration-instance-id=$correlatedinstanceid"))
+
+    Then("the launcher reuses that identity for registration while withholding the internal argument from the runtime")
+    _assert_equals(correlatedcode, 0)
+    _assert_equals(reporter.starts.size, 3)
+    _assert_equals(reporter.starts.last._1.instanceId, correlatedinstanceid)
+    invoker.lastArgs should not contain s"--textus.control-center.registration-instance-id=$correlatedinstanceid"
   }
 
   def standaloneControlCenterLocatorLifecycle(): Unit = _with_temp_paths { paths =>
@@ -3126,12 +3136,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       def isAvailable(port: Int) = true
     }, runner)
 
-    When("the factory starts the resolved profile")
-    val result = factory.start(profile)
+    When("the supervisor starts the resolved profile with its newly allocated registration identity")
+    val correlation = LifecycleSupervisorChildCorrelation("10101010-1010-4010-8010-101010101010")
+    val result = factory.start(profile, correlation)
 
-    Then("it uses a fixed target-first cncf server command and the descriptor port")
+    Then("it uses a fixed target-first cncf server command, the descriptor port, and the same registration identity returned to Control Center")
     result.map(_.port) shouldBe Right(18013)
-    command shouldBe Vector("cncf", project.toAbsolutePath.normalize.toString, "server", "--textus.server.port=18013")
+    result.map(_.instanceId) shouldBe Right(correlation.instanceId)
+    command shouldBe Vector("cncf", project.toAbsolutePath.normalize.toString, "server", "--textus.server.port=18013", s"--textus.control-center.registration-instance-id=${correlation.instanceId}")
     directory shouldBe Some(project.toAbsolutePath.normalize)
   }
 
