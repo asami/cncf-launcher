@@ -8,6 +8,7 @@ import java.net.{HttpURLConnection, InetAddress, InetSocketAddress, ServerSocket
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.TimeUnit
 import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
@@ -50,6 +51,7 @@ object CncfLauncherSpec {
     spec.standaloneControlCenterLocatorLifecycle()
     spec.textusControlCenterRegistrationHttpLifecycle()
     spec.textusControlCenterRegistrationHttpFailureIsolation()
+    spec.lifecycleSupervisorFailurePreservesRegistrationHeartbeat()
     spec.executeTargetFirstDelegatesToRuntime()
     spec.serverExecutionDelegatesDefaultPortResolutionToRuntime()
     spec.runtimeCatalogParseAndSelectorResolution()
@@ -1734,6 +1736,61 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       requests.exists(_.contains("deregister-subsystem")) shouldBe true
     } finally {
       server.stop(0)
+    }
+  }
+
+  def lifecycleSupervisorFailurePreservesRegistrationHeartbeat(): Unit = _with_temp_paths { paths =>
+    Given("a lifecycle request rejected before launch and an independently reachable Control Center registration endpoint")
+    val supervisor = LifecycleSupervisorHttpServer("local-supervisor", "supervisor-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
+    val registrations = new ConcurrentLinkedQueue[String]()
+    val controlcenter = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    controlcenter.createContext("/", new HttpHandler {
+      override def handle(exchange: HttpExchange): Unit = {
+        registrations.add(exchange.getRequestURI.toString)
+        exchange.sendResponseHeaders(204, -1)
+        exchange.close()
+      }
+    })
+    controlcenter.start()
+    try {
+      val supervisorendpoint = s"http://127.0.0.1:${supervisor.getAddress.getPort}/v1/lifecycle-requests"
+      val configuration = CncfTextusControlCenterRegistrationConfig(
+        endpoint = s"http://127.0.0.1:${controlcenter.getAddress.getPort}/rest/v1/textus-control-center/subsystem-inventory",
+        tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
+        timeout = java.time.Duration.ofSeconds(1),
+        heartbeatInterval = java.time.Duration.ofMillis(10),
+        hostLabel = "failure-isolation",
+        baseUrl = "http://127.0.0.1:18013"
+      )
+      val report = CncfTextusControlCenterRegistrationReport(
+        instanceId = "40404040-4040-4040-8040-404040404040",
+        target = "textus-control-center",
+        artifactId = Some("textus-control-center"),
+        executionMode = "development",
+        developmentDirectory = None,
+        subsystemName = Some("textus-control-center"),
+        subsystemVersion = None,
+        runtimeVersion = "spec-runtime",
+        startedAt = java.time.Instant.parse("2026-07-22T00:00:00Z")
+      )
+
+      When("the supervisor rejects the unresolved component and the running launcher sends registration heartbeats")
+      val rejected = _post_lifecycle_request(supervisorendpoint, "missing-component", "failure-isolation-request", "failure-isolation-key")
+      val session = CncfTextusControlCenterRegistrationReporter.System.start(configuration, report, Some("registration-token"))
+      val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+      while (registrations.size < 2 && System.nanoTime() < deadline)
+        Thread.sleep(10L)
+      session.close()
+
+      Then("the failed lifecycle request creates no process authority and does not suppress registration, heartbeat, or deregistration")
+      rejected should include(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+      registrations.iterator.asScala.exists(_.contains("register-subsystem")) shouldBe true
+      registrations.iterator.asScala.exists(_.contains("heartbeat-subsystem")) shouldBe true
+      registrations.iterator.asScala.exists(_.contains("deregister-subsystem")) shouldBe true
+      registrations.iterator.asScala.forall(_.contains("instanceId=40404040-4040-4040-8040-404040404040")) shouldBe true
+    } finally {
+      controlcenter.stop(0)
+      supervisor.stop(0)
     }
   }
 

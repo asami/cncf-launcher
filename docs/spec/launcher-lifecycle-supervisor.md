@@ -93,6 +93,14 @@ child handle. The handle has an opaque supervisor-generated instance ID and is
 the sole authority for Stop and Restart; no PID, command line, directory, or
 port is persisted as process ownership.
 
+For a supervisor-created child, the supervisor injects that opaque instance ID
+as launcher-internal registration metadata. The child `cncf` launcher reuses it
+for Control Center registration and every heartbeat, but removes the metadata
+before invoking the Textus runtime. Thus a lifecycle result and an observed
+runtime instance can be joined by the same ID without treating a rejected,
+timed-out, or unavailable lifecycle request as authority over registration or
+an independently launched process.
+
 Child standard output and standard error are inherited by the supervisor
 process instead of being left in unread pipes, so server logging cannot block a
 running child when a pipe buffer fills.
