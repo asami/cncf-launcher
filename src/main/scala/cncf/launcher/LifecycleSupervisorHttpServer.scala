@@ -13,7 +13,11 @@ import LifecycleSupervisorProtocol.given
 /*
  * @version Jul. 22, 2026
  */
-final class LifecycleSupervisorHttpServer(supervisorid: String, token: String) {
+final class LifecycleSupervisorHttpServer(
+  supervisorid: String,
+  token: String,
+  profiles: LifecycleSupervisorProfileResolver = LifecycleSupervisorProfileResolver(LauncherPaths())
+) {
   private val _state = new AtomicReference(LifecycleSupervisorState(supervisorid))
 
   def start(port: Int): HttpServer = {
@@ -40,9 +44,14 @@ final class LifecycleSupervisorHttpServer(supervisorid: String, token: String) {
   }
 
   private def _submit(request: LifecycleSupervisorRequest): LifecycleSupervisorResult = {
-    var next: LifecycleSupervisorResult = LifecycleSupervisorProtocol.rejected(request, supervisorid, "supervisor-launch-profile-unavailable")
+    val code = profiles.resolve(request.artifactId).fold(identity, _ => "supervisor-execution-unavailable")
+    _reject(request, code)
+  }
+
+  private def _reject(request: LifecycleSupervisorRequest, code: String): LifecycleSupervisorResult = {
+    var next: LifecycleSupervisorResult = LifecycleSupervisorProtocol.rejected(request, supervisorid, code)
     _state.updateAndGet { state =>
-      val (updated, result) = state.submit(request, None, Instant.now())
+      val (updated, result) = state.reject(request, code, Instant.now())
       next = result
       updated
     }

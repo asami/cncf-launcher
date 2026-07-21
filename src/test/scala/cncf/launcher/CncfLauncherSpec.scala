@@ -4,7 +4,7 @@ import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.scalatest.GivenWhenThen
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import java.net.InetSocketAddress
+import java.net.{HttpURLConnection, InetSocketAddress, URI}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -14,7 +14,7 @@ import scala.jdk.CollectionConverters.*
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 21, 2026
+ * @version Jul. 22, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -102,6 +102,9 @@ object CncfLauncherSpec {
     spec.componentRepositoryOutputMatchesTextusIdentityColumns()
     spec.componentRepositoryMalformedLocalIndexIsDiagnosed()
     spec.componentRepositoryCommandDoesNotLoadCncfRuntime()
+    spec.lifecycleSupervisorResolvesExplicitDevelopmentProfile()
+    spec.lifecycleSupervisorRejectsMalformedDevelopmentProfile()
+    spec.lifecycleSupervisorProjectsProfileResolutionToHttp()
     spec.latestRuntimeIsConcrete()
     spec.noCncfRuntimeLibraryDependencies()
     println("CncfLauncherSpec: OK")
@@ -168,6 +171,20 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       "run repository discovery without loading CNCF runtime" in {
         componentRepositoryCommandDoesNotLoadCncfRuntime()
+      }
+    }
+
+    "lifecycle supervisor development profile" which {
+      "resolve an explicitly registered CAR development directory" in {
+        lifecycleSupervisorResolvesExplicitDevelopmentProfile()
+      }
+
+      "reject malformed or mismatched profile declarations without inference" in {
+        lifecycleSupervisorRejectsMalformedDevelopmentProfile()
+      }
+
+      "project resolved and unavailable profiles through the private supervisor HTTP boundary" in {
+        lifecycleSupervisorProjectsProfileResolutionToHttp()
       }
     }
 
@@ -2702,6 +2719,91 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     invoker.lastArgs shouldBe empty
   }
 
+  def lifecycleSupervisorResolvesExplicitDevelopmentProfile(): Unit = _with_temp_paths { paths =>
+    Given("a launcher-private supervisor profile naming an absolute CAR checkout")
+    val project = paths.cwd.resolve("checkout-with-different-directory-name")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    _write(paths.supervisorConfig,
+      s"""schema: cncf.launcher.supervisor.v1
+         |profiles:
+         |  development-directory:
+         |    textus-control-center: ${project.toAbsolutePath}
+         |""".stripMargin)
+
+    When("the supervisor resolves the component identity")
+    val result = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+
+    Then("the descriptor identity selects the configured directory rather than its filesystem name")
+    result.map(_.artifactId) shouldBe Right("textus-control-center")
+    result.map(_.developmentDirectory) shouldBe Right(project.toAbsolutePath.normalize)
+  }
+
+  def lifecycleSupervisorRejectsMalformedDevelopmentProfile(): Unit = _with_temp_paths { paths =>
+    Given("missing, relative, duplicate, and descriptor-mismatched supervisor profiles")
+    val duplicateproject = paths.cwd.resolve("duplicate")
+    val mismatched = paths.cwd.resolve("mismatched")
+    _write(duplicateproject.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    _write(mismatched.resolve("project.yaml"), _component_project_yaml("other-component", "car", "1.0.0-SNAPSHOT"))
+
+    When("the supervisor resolves the declared operational component")
+    val missing = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+    _write(paths.supervisorConfig,
+      """schema: cncf.launcher.supervisor.v1
+        |profiles:
+        |  development-directory:
+        |    textus-control-center: relative-checkout
+        |""".stripMargin)
+    val relative = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+    _write(paths.supervisorConfig,
+      s"""schema: cncf.launcher.supervisor.v1
+         |profiles:
+         |  development-directory:
+         |    textus-control-center: ${duplicateproject.toAbsolutePath}
+         |    textus-control-center: ${duplicateproject.toAbsolutePath}
+         |""".stripMargin)
+    val duplicate = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+    _write(paths.supervisorConfig,
+      s"""schema: cncf.launcher.supervisor.v1
+         |profiles:
+         |  development-directory:
+         |    textus-control-center: ${mismatched.toAbsolutePath}
+         |""".stripMargin)
+    val mismatch = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+
+    Then("each unavailable profile returns one stable safe diagnostic without fallback discovery")
+    missing shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+    relative shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+    duplicate shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+    mismatch shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+  }
+
+  def lifecycleSupervisorProjectsProfileResolutionToHttp(): Unit = _with_temp_paths { paths =>
+    Given("an authenticated supervisor with one explicitly registered CAR development directory")
+    val project = paths.cwd.resolve("registered")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    _write(paths.supervisorConfig,
+      s"""schema: cncf.launcher.supervisor.v1
+         |profiles:
+         |  development-directory:
+         |    textus-control-center: ${project.toAbsolutePath}
+         |""".stripMargin)
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths)).start(0)
+
+    try {
+      When("the lifecycle endpoint receives requests for a registered and an unregistered artifact")
+      val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
+      val registered = _post_lifecycle_request(endpoint, "textus-control-center", "registered-request", "registered-key")
+      val unavailable = _post_lifecycle_request(endpoint, "other-component", "unavailable-request", "unavailable-key")
+
+      Then("the HTTP projection keeps directory data private and distinguishes the safe profile result")
+      registered should include("supervisor-execution-unavailable")
+      registered should not include project.toString
+      unavailable should include(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
+    } finally {
+      server.stop(0)
+    }
+  }
+
   def noCncfRuntimeLibraryDependencies(): Unit = {
     val build = Files.readString(Path.of("build.sbt"))
     build should not include "goldenport-cncf"
@@ -2714,6 +2816,22 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       f
     }
     (code, out.toString)
+  }
+
+  private def _post_lifecycle_request(endpoint: String, artifactid: String, requestid: String, idempotencykey: String): String = {
+    val connection = URI(endpoint).toURL.openConnection().asInstanceOf[HttpURLConnection]
+    val body =
+      s"""{"requestId":"$requestid","idempotencyKey":"$idempotencykey","artifactId":"$artifactid","action":"start","operatorSubjectId":"test-operator","deadlineAt":"2026-07-22T00:00:30Z"}"""
+    connection.setRequestMethod("POST")
+    connection.setRequestProperty("Authorization", "Bearer test-token")
+    connection.setRequestProperty("Content-Type", "application/json")
+    connection.setDoOutput(true)
+    connection.getOutputStream.write(body.getBytes(StandardCharsets.UTF_8))
+    try {
+      new String(connection.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+    } finally {
+      connection.disconnect()
+    }
   }
 
   private def _capture_stdout_stderr(f: => Int): (Int, String, String) = {

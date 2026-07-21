@@ -10,6 +10,16 @@ final case class LifecycleSupervisorState(
   requests: Map[(String, LifecycleAction, String), LifecycleSupervisorResult] = Map.empty,
   ownedInstances: Map[String, String] = Map.empty
 ) {
+  def reject(request: LifecycleSupervisorRequest, code: String, now: Instant): (LifecycleSupervisorState, LifecycleSupervisorResult) = {
+    val key = (request.artifactId, request.action, request.idempotencyKey)
+    requests.get(key) match {
+      case Some(result) => this -> result
+      case None =>
+        val result = LifecycleSupervisorProtocol.rejected(request, supervisorId, code, now)
+        copy(requests = requests.updated(key, result)) -> result
+    }
+  }
+
   def submit(request: LifecycleSupervisorRequest, instanceid: Option[String], now: Instant): (LifecycleSupervisorState, LifecycleSupervisorResult) = {
     val key = (request.artifactId, request.action, request.idempotencyKey)
     requests.get(key) match {

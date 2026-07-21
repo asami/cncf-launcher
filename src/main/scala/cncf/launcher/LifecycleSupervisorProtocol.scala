@@ -48,6 +48,11 @@ object LifecycleSupervisorProtocol {
   given Encoder[LifecycleSupervisorResult] = deriveEncoder
   given Decoder[LifecycleSupervisorResult] = deriveDecoder
 
-  def rejected(request: LifecycleSupervisorRequest, supervisorid: String, code: String): LifecycleSupervisorResult =
-    LifecycleSupervisorResult(request.requestId, "rejected", Some(code), Some(code), supervisorid, None, None, Some(Instant.now()))
+  def rejected(
+    request: LifecycleSupervisorRequest,
+    supervisorid: String,
+    code: String,
+    now: Instant = Instant.now()
+  ): LifecycleSupervisorResult =
+    LifecycleSupervisorResult(request.requestId, "rejected", Some(code), Some(code), supervisorid, None, None, Some(now))
 }
