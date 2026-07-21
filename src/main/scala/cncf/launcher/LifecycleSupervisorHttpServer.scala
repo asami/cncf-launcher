@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 import io.circe.parser.decode
 import io.circe.syntax.*
+import LifecycleSupervisorProtocol.given
 
 /*
  * @version Jul. 22, 2026
