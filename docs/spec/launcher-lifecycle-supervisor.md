@@ -44,15 +44,28 @@ value is an environment-variable name, never a token value. Unknown keys or an
 invalid daemon declaration make the configuration unavailable rather than
 falling back to a default endpoint or credential.
 
-## Foreground Daemon
+## Internal Foreground Daemon
 
-The standalone host command is:
+The standalone host command is retained for implementation diagnostics:
 
 ```text
 cncf launcher supervisor serve
 ```
 
-It resolves only `~/.cncf/launcher/supervisor.yaml`, reads the credential from
+It is not the normal launcher interface and must not replace the canonical
+development-directory invocation:
+
+```text
+cd <development-directory>
+cncf server
+```
+
+That command remains responsible for recognizing its current directory and for
+creating launcher-owned local lifecycle evidence. It may notify a reachable
+Control Center, but its evidence does not depend on Control Center being
+available.
+
+The diagnostic daemon resolves only `~/.cncf/launcher/supervisor.yaml`, reads the credential from
 the configured environment variable, and binds the authenticated supervisor to
 loopback. It runs in the foreground until the process is interrupted, then
 stops its HTTP listener. It does not daemonize, register an operating-system

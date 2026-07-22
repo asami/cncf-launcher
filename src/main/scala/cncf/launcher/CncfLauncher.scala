@@ -353,28 +353,63 @@ final class CncfLauncher(
       case None =>
         runtimeresolver.resolve(runtimeversion, config, paths)
     }
-    val session = _registration_session(command, runtimeversion, config)
+    val report = _server_report(command, runtimeversion)
+    val evidencesession = report.map(_local_evidence_session).getOrElse(CncfLocalServerEvidenceSession.noop)
+    val registrationsession = report.map(_registration_session(command, config, _)).getOrElse(CncfTextusControlCenterRegistrationSession.noop)
     val shutdownhook = new Thread(
-      () => session.close(),
-      "cncf-textus-control-center-registration-shutdown"
+      () => {
+        registrationsession.close()
+        evidencesession.close()
+      },
+      "cncf-server-lifecycle-shutdown"
     )
     Runtime.getRuntime.addShutdownHook(shutdownhook)
     try {
       cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ _runtime_command_args(command.args))
     } finally {
       scala.util.Try(Runtime.getRuntime.removeShutdownHook(shutdownhook))
-      session.close()
+      registrationsession.close()
+      evidencesession.close()
     }
   }
 
+  private def _server_report(
+    command: CncfCommand.Execute,
+    runtimeversion: String
+  ): Option[CncfTextusControlCenterRegistrationReport] =
+    if (!command.args.headOption.contains("server")) {
+      None
+    } else {
+      val target = _registration_target(command.args)
+      Some(CncfTextusControlCenterRegistrationReport(
+        instanceId = _registration_instance_id(command.args).getOrElse(java.util.UUID.randomUUID().toString),
+        target = target.name,
+        artifactId = target.artifactId,
+        executionMode = target.executionMode,
+        developmentDirectory = target.developmentDirectory,
+        subsystemName = target.subsystemName,
+        subsystemVersion = target.subsystemVersion,
+        runtimeVersion = runtimeversion,
+        startedAt = java.time.Instant.now()
+      ))
+    }
+
+  private def _local_evidence_session(
+    report: CncfTextusControlCenterRegistrationReport
+  ): CncfLocalServerEvidenceSession =
+    try {
+      CncfLocalServerEvidenceSession.start(paths, report, "cncf")
+    } catch {
+      case _: Throwable =>
+        Console.err.println("warning: local CNCF server evidence could not be recorded; continuing server startup.")
+        CncfLocalServerEvidenceSession.noop
+    }
+
   private def _registration_session(
     command: CncfCommand.Execute,
-    runtimeversion: String,
-    config: LauncherConfig
-  ): CncfTextusControlCenterRegistrationSession =
-    if (!command.args.headOption.contains("server")) {
-      CncfTextusControlCenterRegistrationSession.noop
-    } else {
+    config: LauncherConfig,
+    report: CncfTextusControlCenterRegistrationReport
+  ): CncfTextusControlCenterRegistrationSession = {
       val registration = config.textusControlCenterRegistration.map(value => value -> environment.get(value.tokenEnv)).orElse {
         Option.when(!config.textusControlCenterRegistrationEnabled.contains(false))(
           CncfTextusControlCenterStandaloneLocator.resolve(paths).map { value =>
@@ -386,20 +421,9 @@ final class CncfLauncher(
       registration match {
         case Some((configuration, token)) =>
           try {
-            val target = _registration_target(command.args)
             registrationreporter.start(
               configuration,
-              CncfTextusControlCenterRegistrationReport(
-                instanceId = _registration_instance_id(command.args).getOrElse(java.util.UUID.randomUUID().toString),
-                target = target.name,
-                artifactId = target.artifactId,
-                executionMode = target.executionMode,
-                developmentDirectory = target.developmentDirectory,
-                subsystemName = target.subsystemName,
-                subsystemVersion = target.subsystemVersion,
-                runtimeVersion = runtimeversion,
-                startedAt = java.time.Instant.now()
-              ),
+              report,
               token
             )
           } catch {
