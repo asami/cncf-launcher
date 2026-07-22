@@ -112,6 +112,7 @@ object CncfLauncherSpec {
     spec.lifecycleSupervisorRejectsMalformedDevelopmentProfile()
     spec.lifecycleSupervisorProjectsProfileResolutionToHttp()
     spec.lifecycleSupervisorRetainsRejectedRequestAcrossRestart()
+    spec.lifecycleSupervisorRejectsExpiredRequest()
     spec.lifecycleSupervisorRejectsCorruptRequestIdentity()
     spec.lifecycleSupervisorControlsOwnedChildOnly()
     spec.lifecycleSupervisorRejectsPersistedOwnershipWithoutChildHandle()
@@ -2991,6 +2992,21 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     }
   }
 
+  def lifecycleSupervisorRejectsExpiredRequest(): Unit = _with_temp_paths { paths =>
+    Given("an authenticated lifecycle request whose absolute deadline has already elapsed")
+    val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
+    try {
+      val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
+
+      When("the local supervisor receives the expired request")
+      val response = _post_lifecycle_request(endpoint, "missing-component", "expired-request", "expired-key", deadline = java.time.Instant.now().minusSeconds(1))
+
+      Then("it retains a safe timed-out result without resolving a profile or creating a child")
+      response should include("supervisor-request-timed-out")
+      response should include("\"state\":\"rejected\"")
+    } finally server.stop(0)
+  }
+
   def lifecycleSupervisorRejectsCorruptRequestIdentity(): Unit = _with_temp_paths { paths =>
     Given("a persisted supervisor ledger with duplicated and mismatched request identity")
     val request = LifecycleSupervisorRequest("request-a", "key-a", "component-a", LifecycleAction.Start, "operator", java.time.Instant.parse("2026-07-22T00:00:30Z"))
@@ -3477,9 +3493,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     (code, out.toString)
   }
 
-  private def _post_lifecycle_request(endpoint: String, artifactid: String, requestid: String, idempotencykey: String, action: String = "start"): String = {
+  private def _post_lifecycle_request(endpoint: String, artifactid: String, requestid: String, idempotencykey: String, action: String = "start", deadline: java.time.Instant = java.time.Instant.now().plusSeconds(60)): String = {
     val connection = URI(endpoint).toURL.openConnection().asInstanceOf[HttpURLConnection]
-    val deadline = java.time.Instant.now().plusSeconds(60)
     val body =
       s"""{"requestId":"$requestid","idempotencyKey":"$idempotencykey","artifactId":"$artifactid","action":"$action","operatorSubjectId":"test-operator","deadlineAt":"$deadline"}"""
     connection.setRequestMethod("POST")
