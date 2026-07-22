@@ -1741,7 +1741,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
   def lifecycleSupervisorFailurePreservesRegistrationHeartbeat(): Unit = _with_temp_paths { paths =>
     Given("a lifecycle request rejected before launch and an independently reachable Control Center registration endpoint")
-    val supervisor = LifecycleSupervisorHttpServer("local-supervisor", "supervisor-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
+    val supervisor = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
     val registrations = new ConcurrentLinkedQueue[String]()
     val controlcenter = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
     controlcenter.createContext("/", new HttpHandler {
