@@ -10,9 +10,8 @@ files directly.
 
 ## Standalone Profile Configuration
 
-The standalone supervisor reads exactly one private profile file:
-`~/.cncf/launcher/supervisor.yaml`. Its initial schema admits only explicitly
-configured CAR development directories:
+The standalone supervisor reads its authority configuration from exactly one
+private file: `~/.cncf/launcher/supervisor.yaml`.
 
 ```yaml
 schema: cncf.launcher.supervisor.v1
@@ -20,23 +19,36 @@ supervisor:
   id: local-supervisor
   port: "18014"
   token-env: CNCF_LIFECYCLE_SUPERVISOR_TOKEN
-profiles:
-  development-directory:
-    textus-control-center: /absolute/path/to/textus-control-center
 ```
 
-The mapping key is the CAR `project.name`, not the directory name. Every value
-must be an absolute directory with a `project.yaml` declaring the same CAR
+The canonical development launch profile is retained from shared Launcher
+evidence, not hand-written in this file. A normal invocation from a CAR
+checkout establishes it:
+
+```text
+cd <development-directory>
+cncf server
+```
+
+That invocation writes a `development` evidence record below
+`~/.cncf/launcher/`. When lifecycle work names the CAR `project.name`, CNCF
+Launcher selects the latest matching retained record and revalidates its
+absolute directory against `project.yaml`: it must still declare the same CAR
 identity and a valid `project.component.config.textus.server.default-port`.
 The declared port is part of the resolved profile; it is neither supplied by a
-caller nor guessed dynamically. A missing, malformed, duplicate,
-non-absolute, mismatched, or portless entry is not inferred from the working
-directory and is reported only as
-`supervisor-launch-profile-unavailable`.
+caller nor guessed dynamically. Missing, malformed, non-absolute, mismatched,
+or portless evidence is rejected as
+`supervisor-launch-profile-unavailable`; Launcher does not search the working
+directory or a process table.
 
-The profile file is launcher-private. It is neither a Control Center setting
-nor a lifecycle request field, and directory values are never returned through
-the supervisor HTTP projection.
+Existing `profiles.development-directory.*` entries are accepted only as a
+migration fallback for a local installation created by an earlier Phase 4
+build. They are never required after the canonical server invocation has left
+evidence, and retained evidence takes precedence over them.
+
+The authority file and profile directory are launcher-private. Neither is a
+Control Center setting or lifecycle request field, and directory values are
+never returned through the supervisor HTTP projection.
 
 `supervisor.id`, `supervisor.port`, and `supervisor.token-env` are required to
 host the standalone supervisor. The port is a valid TCP port and the token-env

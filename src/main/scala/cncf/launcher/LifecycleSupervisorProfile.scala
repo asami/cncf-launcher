@@ -19,9 +19,22 @@ final class LifecycleSupervisorProfileResolver(paths: LauncherPaths) {
   import LifecycleSupervisorProfileResolver.*
 
   def resolve(artifactId: String): Either[String, LifecycleSupervisorLaunchProfile] =
-    _load().flatMap(_.get(artifactId).toRight(PROFILE_UNAVAILABLE))
+    _evidence_profile(artifactId).flatMap {
+      case Some(profile) => Right(profile)
+      case None => _load_legacy().flatMap(_.get(artifactId).toRight(PROFILE_UNAVAILABLE))
+    }
 
-  private def _load(): Either[String, Map[String, LifecycleSupervisorLaunchProfile]] =
+  private def _evidence_profile(artifactid: String): Either[String, Option[LifecycleSupervisorLaunchProfile]] =
+    CncfLocalServerEvidenceStore(paths).latestDevelopmentProfile(artifactid).flatMap {
+      case Some(entry) =>
+        _profile(artifactid, entry.developmentDirectory.get).map(Some(_))
+      case None => Right(None)
+    }.left.map(_ => PROFILE_UNAVAILABLE)
+
+  // Explicit mappings remain a migration-only fallback for existing local
+  // installations.  Normal `cncf server` evidence is always the authoritative
+  // source and therefore needs no supervisor.yaml directory edit.
+  private def _load_legacy(): Either[String, Map[String, LifecycleSupervisorLaunchProfile]] =
     if (!Files.isRegularFile(paths.supervisorConfig))
       Left(PROFILE_UNAVAILABLE)
     else

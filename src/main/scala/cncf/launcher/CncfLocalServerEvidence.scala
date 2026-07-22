@@ -77,6 +77,21 @@ object CncfLocalServerEvidenceSnapshot {
 final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
   import CncfLocalServerEvidenceSnapshot.given
 
+  // This is an internal Launcher lookup.  Unlike listProjection and
+  // detailProjection it is not a Control Center boundary: it retains the local
+  // directory only long enough to validate a lifecycle launch profile.
+  def latestDevelopmentProfile(artifactid: String): Either[String, Option[CncfLocalServerEvidenceEntry]] =
+    _read().map { snapshot =>
+      snapshot.entries
+        .filter { entry =>
+          entry.artifactId.contains(artifactid) &&
+          entry.executionMode == "development" &&
+          entry.developmentDirectory.exists(_.trim.nonEmpty)
+        }
+        .sortBy(entry => (entry.startedAt, entry.instanceId))
+        .lastOption
+    }
+
   def listProjection(): Either[String, CncfLocalServerEvidenceListProjection] =
     _read().map { snapshot =>
       CncfLocalServerEvidenceListProjection(

@@ -112,8 +112,9 @@ object CncfLauncherSpec {
     spec.componentRepositoryOutputMatchesTextusIdentityColumns()
     spec.componentRepositoryMalformedLocalIndexIsDiagnosed()
     spec.componentRepositoryCommandDoesNotLoadCncfRuntime()
-    spec.lifecycleSupervisorResolvesExplicitDevelopmentProfile()
-    spec.lifecycleSupervisorRejectsMalformedDevelopmentProfile()
+    spec.lifecycleSupervisorResolvesRetainedDevelopmentProfile()
+    spec.lifecycleSupervisorRejectsInvalidDevelopmentEvidence()
+    spec.canonicalServerRetainsDevelopmentProfile()
     spec.lifecycleSupervisorProjectsProfileResolutionToHttp()
     spec.lifecycleSupervisorRetainsRejectedRequestAcrossRestart()
     spec.lifecycleSupervisorRejectsExpiredRequest()
@@ -202,12 +203,16 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     }
 
     "lifecycle supervisor development profile" which {
-      "resolve an explicitly registered CAR development directory" in {
-        lifecycleSupervisorResolvesExplicitDevelopmentProfile()
+      "resolve a retained CAR development directory without a supervisor YAML mapping" in {
+        lifecycleSupervisorResolvesRetainedDevelopmentProfile()
       }
 
-      "reject malformed or mismatched profile declarations without inference" in {
-        lifecycleSupervisorRejectsMalformedDevelopmentProfile()
+      "reject invalid retained development evidence without inference" in {
+        lifecycleSupervisorRejectsInvalidDevelopmentEvidence()
+      }
+
+      "retain a lifecycle profile after the canonical current-directory server command" in {
+        canonicalServerRetainsDevelopmentProfile()
       }
 
       "project resolved and unavailable profiles through the private supervisor HTTP boundary" in {
@@ -2908,94 +2913,65 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     invoker.lastArgs shouldBe empty
   }
 
-  def lifecycleSupervisorResolvesExplicitDevelopmentProfile(): Unit = _with_temp_paths { paths =>
-    Given("a launcher-private supervisor profile naming an absolute CAR checkout")
+  def lifecycleSupervisorResolvesRetainedDevelopmentProfile(): Unit = _with_temp_paths { paths =>
+    Given("retained shared Launcher evidence naming an absolute CAR checkout")
     val project = paths.cwd.resolve("checkout-with-different-directory-name")
     _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
-    _write(paths.supervisorConfig,
-      s"""schema: cncf.launcher.supervisor.v1
-         |supervisor:
-         |  id: local-supervisor
-         |  port: "18014"
-         |  token-env: CNCF_LIFECYCLE_SUPERVISOR_TOKEN
-         |profiles:
-         |  development-directory:
-         |    textus-control-center: ${project.toAbsolutePath}
-         |""".stripMargin)
+    _record_development_evidence(paths, project, "textus-control-center", "textus")
 
     When("the supervisor resolves the component identity")
     val result = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
 
-    Then("the descriptor identity selects the configured directory rather than its filesystem name")
+    Then("the descriptor identity selects the retained directory rather than its filesystem name")
     result.map(_.artifactId) shouldBe Right("textus-control-center")
     result.map(_.developmentDirectory) shouldBe Right(project.toAbsolutePath.normalize)
     result.map(_.defaultPort) shouldBe Right(18013)
   }
 
-  def lifecycleSupervisorRejectsMalformedDevelopmentProfile(): Unit = _with_temp_paths { paths =>
-    Given("missing, relative, duplicate, portless, and descriptor-mismatched supervisor profiles")
-    val duplicateproject = paths.cwd.resolve("duplicate")
+  def lifecycleSupervisorRejectsInvalidDevelopmentEvidence(): Unit = _with_temp_paths { paths =>
+    Given("missing, portless, and descriptor-mismatched retained development evidence")
     val mismatched = paths.cwd.resolve("mismatched")
     val portless = paths.cwd.resolve("portless")
-    _write(duplicateproject.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
     _write(mismatched.resolve("project.yaml"), _component_project_yaml("other-component", "car", "1.0.0-SNAPSHOT"))
     _write(portless.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", 0))
 
-    When("the supervisor resolves the declared operational component")
+    When("the supervisor resolves each unavailable operational component")
     val missing = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
-    _write(paths.supervisorConfig,
-      """schema: cncf.launcher.supervisor.v1
-        |profiles:
-        |  development-directory:
-        |    textus-control-center: relative-checkout
-        |""".stripMargin)
-    val relative = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
-    _write(paths.supervisorConfig,
-      s"""schema: cncf.launcher.supervisor.v1
-         |profiles:
-         |  development-directory:
-         |    textus-control-center: ${duplicateproject.toAbsolutePath}
-         |    textus-control-center: ${duplicateproject.toAbsolutePath}
-         |""".stripMargin)
-    val duplicate = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
-    _write(paths.supervisorConfig,
-      s"""schema: cncf.launcher.supervisor.v1
-         |profiles:
-         |  development-directory:
-         |    textus-control-center: ${mismatched.toAbsolutePath}
-         |""".stripMargin)
+    _record_development_evidence(paths, mismatched, "textus-control-center")
     val mismatch = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
-    _write(paths.supervisorConfig,
-      s"""schema: cncf.launcher.supervisor.v1
-         |profiles:
-         |  development-directory:
-         |    textus-control-center: ${portless.toAbsolutePath}
-         |""".stripMargin)
+    _record_development_evidence(paths, portless, "textus-control-center")
     val invalidport = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
 
-    Then("each unavailable profile returns one stable safe diagnostic without fallback discovery")
+    Then("each unavailable profile returns one stable safe diagnostic without filesystem discovery")
     missing shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
-    relative shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
-    duplicate shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
     mismatch shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
     invalidport shouldBe Left(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
   }
 
+  def canonicalServerRetainsDevelopmentProfile(): Unit = _with_temp_paths { paths =>
+    Given("a CAR project started through the canonical current-directory command")
+    _write(paths.cwd.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+
+    When("cncf server completes while no supervisor profile mapping exists")
+    launcher.run(Vector("server")) shouldBe 0
+    val profile = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+
+    Then("the retained evidence supplies the validated lifecycle profile")
+    profile.map(_.developmentDirectory) shouldBe Right(paths.cwd.toAbsolutePath.normalize)
+    profile.map(_.defaultPort) shouldBe Right(18013)
+  }
+
   def lifecycleSupervisorProjectsProfileResolutionToHttp(): Unit = _with_temp_paths { paths =>
-    Given("an authenticated supervisor with one explicitly registered CAR development directory and an occupied declared port")
+    Given("an authenticated supervisor with retained CAR development evidence and an occupied declared port")
     val project = paths.cwd.resolve("registered")
     val listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress)
     _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", listener.getLocalPort))
-    _write(paths.supervisorConfig,
-      s"""schema: cncf.launcher.supervisor.v1
-         |profiles:
-         |  development-directory:
-         |    textus-control-center: ${project.toAbsolutePath}
-         |""".stripMargin)
+    _record_development_evidence(paths, project, "textus-control-center")
     val server = LifecycleSupervisorHttpServer("local-supervisor", "test-token", LifecycleSupervisorProfileResolver(paths), Some(LifecycleSupervisorStateStore(paths, "local-supervisor"))).start(0)
 
     try {
-      When("the lifecycle endpoint receives requests for a registered and an unregistered artifact")
+      When("the lifecycle endpoint receives requests for a retained and an unregistered artifact")
       val endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/v1/lifecycle-requests"
       val registered = _post_lifecycle_request(endpoint, "textus-control-center", "registered-request", "registered-key")
       val unavailable = _post_lifecycle_request(endpoint, "other-component", "unavailable-request", "unavailable-key")
@@ -3823,6 +3799,27 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
        |  port: "$port"
        |  token-env: $tokenenv
        |""".stripMargin
+
+  private def _record_development_evidence(
+    paths: LauncherPaths,
+    project: Path,
+    artifactid: String,
+    launcherkind: String = "cncf"
+  ): Unit =
+    CncfLocalServerEvidenceStore(paths).started(
+      CncfTextusControlCenterRegistrationReport(
+        instanceId = java.util.UUID.randomUUID().toString,
+        target = artifactid,
+        artifactId = Some(artifactid),
+        executionMode = "development",
+        developmentDirectory = Some(project.toAbsolutePath.normalize.toString),
+        subsystemName = Some(artifactid),
+        subsystemVersion = Some("1.0.0-SNAPSHOT"),
+        runtimeVersion = "0.5.0-SNAPSHOT",
+        startedAt = java.time.Instant.now()
+      ),
+      launcherkind
+    )
 
   private def _component_repository_index(kind: String, artifactid: String, version: String): String =
     s"""{
