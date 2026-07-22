@@ -48,6 +48,7 @@ object CncfLauncherSpec {
     spec.installCliPinsDevelopmentRuntimeWithoutCatalog()
     spec.installCliRejectsIncompatibleDevelopmentRuntime()
     spec.textusControlCenterRegistrationLifecycle()
+    spec.localServerEvidenceProjection()
     spec.standaloneControlCenterLocatorLifecycle()
     spec.textusControlCenterRegistrationHttpLifecycle()
     spec.textusControlCenterRegistrationHttpFailureIsolation()
@@ -2767,6 +2768,39 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     list.developmentDirs shouldBe Vector("../dependency")
     show.target shouldBe "textus-blog"
     show.kind shouldBe Some("sar")
+  }
+
+  def localServerEvidenceProjection(): Unit = _with_temp_paths { paths =>
+    Given("a shared launcher evidence record containing a local development directory")
+    val evidence = CncfLocalServerEvidenceStore(paths)
+    val report = CncfTextusControlCenterRegistrationReport(
+      "textus-instance",
+      "textus-control-center",
+      Some("textus-control-center"),
+      "development",
+      Some("/private/work/textus-control-center"),
+      Some("Textus Control Center"),
+      Some("0.1.0-SNAPSHOT"),
+      "0.5.0-SNAPSHOT",
+      java.time.Instant.parse("2026-07-22T00:00:00Z")
+    )
+    evidence.started(report, "textus")
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+
+    When("the CNCF Launcher projects list and protected-detail evidence")
+    val (listcode, listoutput, listerror) = _capture_stdout_stderr(launcher.run(Vector("launcher", "evidence", "list", "--format", "json")))
+    val (showcode, showoutput, showerror) = _capture_stdout_stderr(launcher.run(Vector("launcher", "evidence", "show", "textus-instance", "--format=json")))
+
+    Then("the common list omits the path while detail retains the selected local record")
+    listcode shouldBe 0
+    listerror shouldBe empty
+    listoutput should include("cncf.launcher.evidence-projection.v1")
+    listoutput should include("textus-instance")
+    listoutput should not include "/private/work/textus-control-center"
+    showcode shouldBe 0
+    showerror shouldBe empty
+    showoutput should include("/private/work/textus-control-center")
+    CncfCommandParser.parse(Vector("launcher", "evidence", "list", "--format", "json")) shouldBe CncfCommand.Evidence.List("json")
   }
 
   def componentRepositoryDevelopmentOverridesLocalIdentity(): Unit = _with_temp_paths { paths =>

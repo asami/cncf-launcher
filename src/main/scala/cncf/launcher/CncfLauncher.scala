@@ -5,6 +5,8 @@ import java.nio.file.Files
 import java.util.zip.ZipFile
 import scala.util.Try
 
+import io.circe.syntax.*
+
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
@@ -50,6 +52,8 @@ final class CncfLauncher(
         _run_repository(repository)
       case supervisor: CncfCommand.Supervisor =>
         _run_supervisor(supervisor)
+      case evidence: CncfCommand.Evidence =>
+        _run_evidence(evidence)
       case install: CncfCommand.InstallCli =>
         _run_install_cli(install, configfiles, cncfconfigfiles)
       case execute: CncfCommand.Execute =>
@@ -84,6 +88,24 @@ final class CncfLauncher(
           )(token => supervisorhost.serve(configuration, token, paths))
         })
     }
+
+  private def _run_evidence(command: CncfCommand.Evidence): Int = {
+    import CncfLocalServerEvidenceSnapshot.given
+    val evidence = CncfLocalServerEvidenceStore(paths)
+    command match {
+      case CncfCommand.Evidence.List("json") =>
+        evidence.listProjection().fold(code => throw CncfException(code), projection => println(projection.asJson.noSpaces))
+        0
+      case CncfCommand.Evidence.Show(instanceid, "json") =>
+        evidence.detailProjection(instanceid).fold(code => throw CncfException(code), {
+          case Some(projection) => println(projection.asJson.noSpaces)
+          case None => throw CncfException("launcher-evidence-not-found")
+        })
+        0
+      case _ =>
+        throw CncfException("cncf launcher evidence format must be json")
+    }
+  }
 
   private def _delegate_launcher_dev_dir(
     config: LauncherConfig,

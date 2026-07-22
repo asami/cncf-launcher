@@ -94,6 +94,12 @@ object CncfCommand {
     case object Serve extends Supervisor
   }
 
+  sealed trait Evidence extends CncfCommand
+  object Evidence {
+    final case class List(format: String) extends Evidence
+    final case class Show(instanceId: String, format: String) extends Evidence
+  }
+
 
   enum DevTarget {
     case ProjectDev(path: Option[String])
@@ -172,8 +178,19 @@ object CncfCommandParser {
     args match {
       case Vector("supervisor", "serve") => CncfCommand.Supervisor.Serve
       case Vector("supervisor") => throw CncfException("cncf launcher supervisor requires serve")
+      case Vector("evidence", "list", "--format", format) => CncfCommand.Evidence.List(_evidence_format(format))
+      case Vector("evidence", "list", value) if value.startsWith("--format=") => CncfCommand.Evidence.List(_evidence_format(value.stripPrefix("--format=")))
+      case Vector("evidence", "show", instanceid, "--format", format) => CncfCommand.Evidence.Show(_evidence_instance_id(instanceid), _evidence_format(format))
+      case Vector("evidence", "show", instanceid, value) if value.startsWith("--format=") => CncfCommand.Evidence.Show(_evidence_instance_id(instanceid), _evidence_format(value.stripPrefix("--format=")))
+      case Vector("evidence") => throw CncfException("cncf launcher evidence requires list or show")
       case other => throw CncfException(s"unknown cncf launcher command: ${other.mkString(" ")}")
     }
+
+  private def _evidence_format(value: String): String =
+    if (value == "json") value else throw CncfException("cncf launcher evidence format must be json")
+
+  private def _evidence_instance_id(value: String): String =
+    Option(value).map(_.trim).filter(_.nonEmpty).getOrElse(throw CncfException("cncf launcher evidence show requires an instance id"))
 
   private def _parse_repository(args: Vector[String]): CncfCommand.Repository = {
     if (args.isEmpty) throw CncfException("cncf repository requires list or show")
@@ -674,6 +691,8 @@ object CncfCommandParser {
       |  cncf --version
       |  cncf version
       |  cncf launcher version
+      |  cncf launcher evidence list --format json
+      |  cncf launcher evidence show <instance-id> --format json
       |  cncf launcher supervisor serve
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] install-cli <command-base-name> [--project-dev <dir>] [--component-dev-dir <dir>...] [--operation-prefix <component.service>] [--file-param <name>...] [--bin-dir <dir>] [--overwrite]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> command <operation> [args...]
@@ -712,6 +731,7 @@ object CncfCommandParser {
       |  CNCF_VERSION/CNCF_RUNTIME_VERSION override the configured runtime version.
       |  CNCF_RUNTIME_DEV_DIR directly selects a local CNCF runtime checkout.
       |  CNCF_LAUNCHER_DEV_DIR directly selects a local cncf-launcher checkout.
+      |  cncf launcher evidence projects Launcher-owned shared server evidence without starting a service; list omits development directories and show returns one protected local-detail record.
       |  cncf launcher supervisor serve starts the authenticated lifecycle supervisor on loopback using ~/.cncf/launcher/supervisor.yaml.
       |  Config development.enabled=true activates development.launcher.dev-dir and development.runtime.dev-dir.
       |  Config development.launcher.enabled and development.runtime.enabled override the common development switch independently.

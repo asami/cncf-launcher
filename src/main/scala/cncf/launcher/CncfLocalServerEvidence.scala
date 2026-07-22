@@ -38,6 +38,30 @@ final case class CncfLocalServerEvidenceSnapshot(
   entries: Vector[CncfLocalServerEvidenceEntry]
 )
 
+final case class CncfLocalServerEvidenceListEntry(
+  launcherKind: String,
+  instanceId: String,
+  target: String,
+  artifactId: Option[String],
+  executionMode: String,
+  subsystemName: Option[String],
+  subsystemVersion: Option[String],
+  runtimeVersion: String,
+  startedAt: Instant,
+  lastSeenAt: Instant,
+  stoppedAt: Option[Instant]
+)
+
+final case class CncfLocalServerEvidenceListProjection(
+  schema: String,
+  entries: Vector[CncfLocalServerEvidenceListEntry]
+)
+
+final case class CncfLocalServerEvidenceDetailProjection(
+  schema: String,
+  entry: CncfLocalServerEvidenceEntry
+)
+
 object CncfLocalServerEvidenceSnapshot {
   val Schema = "cncf.launcher.server-evidence.v1"
 
@@ -45,10 +69,40 @@ object CncfLocalServerEvidenceSnapshot {
   given Decoder[CncfLocalServerEvidenceEntry] = deriveDecoder
   given Encoder[CncfLocalServerEvidenceSnapshot] = deriveEncoder
   given Decoder[CncfLocalServerEvidenceSnapshot] = deriveDecoder
+  given Encoder[CncfLocalServerEvidenceListEntry] = deriveEncoder
+  given Encoder[CncfLocalServerEvidenceListProjection] = deriveEncoder
+  given Encoder[CncfLocalServerEvidenceDetailProjection] = deriveEncoder
 }
 
 final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
   import CncfLocalServerEvidenceSnapshot.given
+
+  def listProjection(): Either[String, CncfLocalServerEvidenceListProjection] =
+    _read().map { snapshot =>
+      CncfLocalServerEvidenceListProjection(
+        CncfLocalServerEvidenceStore.ProjectionSchema,
+        snapshot.entries.sortBy(entry => (entry.target, entry.instanceId)).map { entry =>
+          CncfLocalServerEvidenceListEntry(
+            entry.launcherKind,
+            entry.instanceId,
+            entry.target,
+            entry.artifactId,
+            entry.executionMode,
+            entry.subsystemName,
+            entry.subsystemVersion,
+            entry.runtimeVersion,
+            entry.startedAt,
+            entry.lastSeenAt,
+            entry.stoppedAt
+          )
+        }
+      )
+    }
+
+  def detailProjection(instanceid: String): Either[String, Option[CncfLocalServerEvidenceDetailProjection]] =
+    _read().map { snapshot =>
+      snapshot.entries.find(_.instanceId == instanceid).map(entry => CncfLocalServerEvidenceDetailProjection(CncfLocalServerEvidenceStore.ProjectionSchema, entry))
+    }
 
   def started(report: CncfTextusControlCenterRegistrationReport, launcherkind: String): Unit =
     _update { entries =>
@@ -112,9 +166,23 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
       decode[CncfLocalServerEvidenceSnapshot](Files.readString(paths.serverEvidence, StandardCharsets.UTF_8)).toOption.
         filter(_.schema == CncfLocalServerEvidenceSnapshot.Schema).
         getOrElse(CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, Vector.empty))
+
+  private def _read(): Either[String, CncfLocalServerEvidenceSnapshot] =
+    if (!Files.isRegularFile(paths.serverEvidence))
+      Right(CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, Vector.empty))
+    else
+      try {
+        decode[CncfLocalServerEvidenceSnapshot](Files.readString(paths.serverEvidence, StandardCharsets.UTF_8)).toOption
+          .filter(_.schema == CncfLocalServerEvidenceSnapshot.Schema)
+          .toRight(CncfLocalServerEvidenceStore.EvidenceUnavailable)
+      } catch {
+        case _: Throwable => Left(CncfLocalServerEvidenceStore.EvidenceUnavailable)
+      }
 }
 
 object CncfLocalServerEvidenceStore {
+  val ProjectionSchema = "cncf.launcher.evidence-projection.v1"
+  val EvidenceUnavailable = "launcher-evidence-unavailable"
   private val lock = new Object
 }
 
