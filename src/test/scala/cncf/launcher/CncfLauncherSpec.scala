@@ -52,6 +52,7 @@ object CncfLauncherSpec {
     spec.installCliRejectsIncompatibleDevelopmentRuntime()
     spec.textusControlCenterRegistrationLifecycle()
     spec.localServerEvidenceProjection()
+    spec.localServerEvidenceRetentionAndRecovery()
     spec.standaloneControlCenterLocatorLifecycle()
     spec.textusControlCenterRegistrationHttpLifecycle()
     spec.textusControlCenterRegistrationHttpFailureIsolation()
@@ -113,6 +114,7 @@ object CncfLauncherSpec {
     spec.componentRepositoryMalformedLocalIndexIsDiagnosed()
     spec.componentRepositoryCommandDoesNotLoadCncfRuntime()
     spec.lifecycleSupervisorResolvesRetainedDevelopmentProfile()
+    spec.lifecycleSupervisorUsesRetainedMutationOrder()
     spec.lifecycleSupervisorRejectsInvalidDevelopmentEvidence()
     spec.canonicalServerRetainsDevelopmentProfile()
     spec.lifecycleSupervisorProjectsProfileResolutionToHttp()
@@ -205,6 +207,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     "lifecycle supervisor development profile" which {
       "resolve a retained CAR development directory without a supervisor YAML mapping" in {
         lifecycleSupervisorResolvesRetainedDevelopmentProfile()
+      }
+
+      "prefer the latest retained mutation over a skewed launcher timestamp" in {
+        lifecycleSupervisorUsesRetainedMutationOrder()
       }
 
       "reject invalid retained development evidence without inference" in {
@@ -448,6 +454,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       "canonical server commands report one Textus Control Center lifecycle" in {
         textusControlCenterRegistrationLifecycle()
+      }
+
+      "retain bounded shared evidence and preserve malformed evidence for recovery" in {
+        localServerEvidenceRetentionAndRecovery()
       }
 
       "canonical server commands resolve one standalone Control Center locator" in {
@@ -2821,6 +2831,44 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     CncfCommandParser.parse(Vector("launcher", "evidence", "list", "--format", "json")) shouldBe CncfCommand.Evidence.List("json")
   }
 
+  def localServerEvidenceRetentionAndRecovery(): Unit = _with_temp_paths { paths =>
+    import CncfLocalServerEvidenceSnapshot.given
+
+    Given("stale, bounded, malformed, and independently written shared evidence")
+    val now = java.time.Instant.now()
+    val stale = CncfLocalServerEvidenceEntry("cncf", "stale", "stale", Some("stale"), "development", None, None, None, "0.5.0", now.minus(CncfLocalServerEvidenceStore.Retention).minusSeconds(1), now.minus(CncfLocalServerEvidenceStore.Retention).minusSeconds(1), Some(now.minus(CncfLocalServerEvidenceStore.Retention).minusSeconds(1)))
+    _write(paths.serverEvidence, CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, Vector(stale)).asJson.noSpaces)
+    val store = CncfLocalServerEvidenceStore(paths)
+
+    When("a canonical Launcher update follows the retention boundary")
+    store.started(_local_evidence_report("fresh"), "cncf")
+    val retained = store.listProjection().toOption.get.entries.map(_.instanceId)
+
+    And("a bounded store receives one entry beyond its maximum")
+    val bounded = Vector.tabulate(CncfLocalServerEvidenceStore.MaximumEntries)(index =>
+      CncfLocalServerEvidenceEntry("cncf", s"bounded-$index", s"bounded-$index", Some(s"bounded-$index"), "development", None, None, None, "0.5.0", now, now, None)
+    )
+    _write(paths.serverEvidence, CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, bounded).asJson.noSpaces)
+    store.started(_local_evidence_report("bounded-fresh"), "cncf")
+    val capped = store.listProjection().toOption.get.entries.map(_.instanceId)
+
+    And("the next update encounters malformed content before independent writer updates")
+    _write(paths.serverEvidence, "{malformed")
+    store.started(_local_evidence_report("recovered"), "cncf")
+    CncfLocalServerEvidenceStore(paths).started(_local_evidence_report("textus-writer"), "textus")
+    val recovered = store.listProjection().toOption.get.entries.map(_.instanceId)
+    val files = Files.list(paths.serverEvidence.getParent)
+    val recovery = try files.iterator.asScala.toVector.find(_.getFileName.toString.startsWith("server-evidence.recovery-")) finally files.close()
+
+    Then("stale entries are pruned, mutation order enforces the cap, malformed bytes are retained, and writers preserve each other")
+    retained shouldBe Vector("fresh")
+    capped should have size CncfLocalServerEvidenceStore.MaximumEntries
+    capped should not contain "bounded-0"
+    capped should contain("bounded-fresh")
+    recovered should contain allOf ("recovered", "textus-writer")
+    recovery.map(Files.readString) shouldBe Some("{malformed")
+  }
+
   def componentRepositoryDevelopmentOverridesLocalIdentity(): Unit = _with_temp_paths { paths =>
     Given("a local repository entry and an admitted checkout with the same descriptor identity")
     _write(paths.localRepository.resolve("repository/catalog/index.json"), _component_repository_index("car", "textus-blog", "1.0.0"))
@@ -2926,6 +2974,23 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     result.map(_.artifactId) shouldBe Right("textus-control-center")
     result.map(_.developmentDirectory) shouldBe Right(project.toAbsolutePath.normalize)
     result.map(_.defaultPort) shouldBe Right(18013)
+  }
+
+  def lifecycleSupervisorUsesRetainedMutationOrder(): Unit = _with_temp_paths { paths =>
+    Given("two retained development records whose first launcher timestamp is ahead of the local clock")
+    val first = paths.cwd.resolve("first")
+    val latest = paths.cwd.resolve("latest")
+    _write(first.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", 18013))
+    _write(latest.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT", 18014))
+    _record_development_evidence(paths, first, "textus-control-center", startedat = java.time.Instant.now().plusSeconds(3600))
+    _record_development_evidence(paths, latest, "textus-control-center", startedat = java.time.Instant.now())
+
+    When("the supervisor resolves the retained profile")
+    val result = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+
+    Then("local mutation order wins without trusting the skewed timestamp as ordering authority")
+    result.map(_.developmentDirectory) shouldBe Right(latest.toAbsolutePath.normalize)
+    result.map(_.defaultPort) shouldBe Right(18014)
   }
 
   def lifecycleSupervisorRejectsInvalidDevelopmentEvidence(): Unit = _with_temp_paths { paths =>
@@ -3804,7 +3869,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     paths: LauncherPaths,
     project: Path,
     artifactid: String,
-    launcherkind: String = "cncf"
+    launcherkind: String = "cncf",
+    startedat: java.time.Instant = java.time.Instant.now()
   ): Unit =
     CncfLocalServerEvidenceStore(paths).started(
       CncfTextusControlCenterRegistrationReport(
@@ -3816,9 +3882,22 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         subsystemName = Some(artifactid),
         subsystemVersion = Some("1.0.0-SNAPSHOT"),
         runtimeVersion = "0.5.0-SNAPSHOT",
-        startedAt = java.time.Instant.now()
+        startedAt = startedat
       ),
       launcherkind
+    )
+
+  private def _local_evidence_report(instanceid: String): CncfTextusControlCenterRegistrationReport =
+    CncfTextusControlCenterRegistrationReport(
+      instanceId = instanceid,
+      target = instanceid,
+      artifactId = Some(instanceid),
+      executionMode = "development",
+      developmentDirectory = None,
+      subsystemName = None,
+      subsystemVersion = None,
+      runtimeVersion = "0.5.0-SNAPSHOT",
+      startedAt = java.time.Instant.now()
     )
 
   private def _component_repository_index(kind: String, artifactid: String, version: String): String =

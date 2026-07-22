@@ -2,7 +2,7 @@ package cncf.launcher
 
 import java.nio.charset.StandardCharsets
 import java.nio.channels.FileChannel
-import java.nio.file.{Files, StandardCopyOption}
+import java.nio.file.{AtomicMoveNotSupportedException, Files, StandardCopyOption}
 import java.nio.file.StandardOpenOption.{CREATE, WRITE}
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicBoolean
@@ -88,7 +88,6 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
           entry.executionMode == "development" &&
           entry.developmentDirectory.exists(_.trim.nonEmpty)
         }
-        .sortBy(entry => (entry.startedAt, entry.instanceId))
         .lastOption
     }
 
@@ -139,16 +138,16 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
     }
 
   def alive(instanceid: String): Unit =
-    _update(_.map { entry =>
-      if (entry.instanceId == instanceid && entry.stoppedAt.isEmpty) entry.copy(lastSeenAt = Instant.now()) else entry
+    _update(_touch(_, instanceid) { entry =>
+      if (entry.stoppedAt.isEmpty) Some(entry.copy(lastSeenAt = Instant.now())) else None
     })
 
   def stopped(instanceid: String): Unit =
-    _update(_.map { entry =>
-      if (entry.instanceId == instanceid && entry.stoppedAt.isEmpty) {
+    _update(_touch(_, instanceid) { entry =>
+      if (entry.stoppedAt.isEmpty) {
         val now = Instant.now()
-        entry.copy(lastSeenAt = now, stoppedAt = Some(now))
-      } else entry
+        Some(entry.copy(lastSeenAt = now, stoppedAt = Some(now)))
+      } else None
     })
 
   private def _update(f: Vector[CncfLocalServerEvidenceEntry] => Vector[CncfLocalServerEvidenceEntry]): Unit = CncfLocalServerEvidenceStore.lock.synchronized {
@@ -158,7 +157,7 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
       val lock = channel.lock()
       try {
         val snapshot = _load()
-        val updated = CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, f(snapshot.entries))
+        val updated = CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, _retain(f(snapshot.entries), Instant.now()))
         val temporary = Files.createTempFile(paths.serverEvidence.getParent, ".server-evidence-", ".json")
         try {
           Files.writeString(temporary, updated.asJson.noSpaces + "\n", StandardCharsets.UTF_8)
@@ -180,7 +179,28 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
     else
       decode[CncfLocalServerEvidenceSnapshot](Files.readString(paths.serverEvidence, StandardCharsets.UTF_8)).toOption.
         filter(_.schema == CncfLocalServerEvidenceSnapshot.Schema).
-        getOrElse(CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, Vector.empty))
+        getOrElse(_recover_malformed())
+
+  private def _recover_malformed(): CncfLocalServerEvidenceSnapshot = {
+    val recovery = paths.serverEvidence.resolveSibling(s"server-evidence.recovery-${java.util.UUID.randomUUID().toString}.json")
+    try Files.move(paths.serverEvidence, recovery, StandardCopyOption.ATOMIC_MOVE)
+    catch {
+      case _: AtomicMoveNotSupportedException => Files.move(paths.serverEvidence, recovery)
+    }
+    CncfLocalServerEvidenceSnapshot(CncfLocalServerEvidenceSnapshot.Schema, Vector.empty)
+  }
+
+  private def _touch(
+    entries: Vector[CncfLocalServerEvidenceEntry],
+    instanceid: String
+  )(f: CncfLocalServerEvidenceEntry => Option[CncfLocalServerEvidenceEntry]): Vector[CncfLocalServerEvidenceEntry] =
+    entries.find(_.instanceId == instanceid).flatMap(f) match {
+      case Some(updated) => entries.filterNot(_.instanceId == instanceid) :+ updated
+      case None => entries
+    }
+
+  private def _retain(entries: Vector[CncfLocalServerEvidenceEntry], now: Instant): Vector[CncfLocalServerEvidenceEntry] =
+    entries.filter(entry => !entry.lastSeenAt.plus(CncfLocalServerEvidenceStore.Retention).isBefore(now)).takeRight(CncfLocalServerEvidenceStore.MaximumEntries)
 
   private def _read(): Either[String, CncfLocalServerEvidenceSnapshot] =
     if (!Files.isRegularFile(paths.serverEvidence))
@@ -198,6 +218,8 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
 object CncfLocalServerEvidenceStore {
   val ProjectionSchema = "cncf.launcher.evidence-projection.v1"
   val EvidenceUnavailable = "launcher-evidence-unavailable"
+  val Retention: Duration = Duration.ofDays(30)
+  val MaximumEntries = 512
   private val lock = new Object
 }
 
