@@ -772,6 +772,7 @@ object CncfCommandParser {
       |  CNCF_VERSION/CNCF_RUNTIME_VERSION override the configured runtime version.
       |  CNCF_RUNTIME_DEV_DIR directly selects a local CNCF runtime checkout.
       |  CNCF_LAUNCHER_DEV_DIR directly selects a local cncf-launcher checkout.
+      |  --launcher-home <dir> selects an explicit Launcher state-home root for isolated integration tests; omit it in normal operation, where cncf server uses ~/.cncf.
       |  cncf launcher evidence projects Launcher-owned shared server evidence without starting a service; list omits development directories and show returns one protected local-detail record.
       |  cncf launcher lifecycle internally ensures the authenticated local lifecycle authority using ~/.cncf/launcher/supervisor.yaml. The foreground supervisor serve command is diagnostic-only and is not required for cncf server or Control Center operations.
       |  Config development.enabled=true activates development.launcher.dev-dir and development.runtime.dev-dir.

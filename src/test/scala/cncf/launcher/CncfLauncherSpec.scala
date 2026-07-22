@@ -1388,13 +1388,23 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   }
 
   def runtimeUseWritesExpectedFiles(): Unit = _with_temp_paths { paths =>
-    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
     launcher.run(Vector("runtime", "use", "latest"))
     _assert_equals(Files.readString(paths.globalVersion).trim, "latest")
     launcher.run(Vector("runtime", "use", "0.2.0", "--global"))
     launcher.run(Vector("runtime", "use", "0.3.0", "--project"))
     _assert_equals(Files.readString(paths.globalVersion).trim, "0.2.0")
     _assert_equals(Files.readString(paths.projectVersion).trim, "0.3.0")
+    val isolatedhome = paths.cwd.resolve("isolated-launcher-home")
+    launcher.run(Vector("--launcher-home", isolatedhome.toString, "runtime", "use", "0.4.0", "--global"))
+    _assert_equals(Files.readString(isolatedhome.resolve(".cncf").resolve("version")).trim, "0.4.0")
+    _assert_equals(Files.readString(paths.globalVersion).trim, "0.2.0")
+    val passthroughhome = "runtime-passthrough-home"
+    launcher.run(Vector("server", "--", "--launcher-home", passthroughhome))
+    invoker.lastArgs.contains("--launcher-home") shouldBe true
+    invoker.lastArgs.contains(passthroughhome) shouldBe true
+    Files.exists(paths.cwd.resolve(passthroughhome).resolve(".cncf")) shouldBe false
   }
 
   def runtimeUseAutoSelectsProjectWhenCncfDirectoryExists(): Unit = _with_temp_paths { paths =>
@@ -2498,6 +2508,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     help.contains("descriptor source metadata lives under src/main/web-inf") shouldBe true
     help.contains("textus server <artifact> is the CAR/SAR artifact launcher") shouldBe true
     help.contains("ancestor conf/cncf/config.yaml and .cncf/config.yaml") shouldBe true
+    help.contains("--launcher-home <dir> selects an explicit Launcher state-home root") shouldBe true
   }
 
   def devCheckReportsMainTargetAndDependencyResolution(): Unit = _with_temp_paths { paths =>
@@ -3018,11 +3029,15 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _write(paths.cwd.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
     val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
 
-    When("cncf server completes while no supervisor profile mapping exists")
+    When("cncf server completes while no supervisor profile mapping or foreground authority command exists")
     launcher.run(Vector("server")) shouldBe 0
     val profile = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
+    val evidence = CncfLocalServerEvidenceStore(paths).listProjection().toOption.get.entries
 
-    Then("the retained evidence supplies the validated lifecycle profile")
+    Then("the public current-directory command retains evidence and supplies the validated lifecycle profile")
+    Files.exists(paths.supervisorConfig) shouldBe false
+    evidence.map(_.launcherKind) should contain ("cncf")
+    evidence.map(_.stoppedAt.isDefined) should contain (true)
     profile.map(_.developmentDirectory) shouldBe Right(paths.cwd.toAbsolutePath.normalize)
     profile.map(_.defaultPort) shouldBe Right(18013)
   }

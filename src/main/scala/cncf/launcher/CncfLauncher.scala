@@ -1,7 +1,7 @@
 package cncf.launcher
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
+import java.nio.file.{Files, Path}
 import java.util.zip.ZipFile
 import scala.util.Try
 
@@ -25,7 +25,12 @@ final class CncfLauncher(
   supervisorhost: LifecycleSupervisorDaemonHost = LifecycleSupervisorDaemonHost.System,
   supervisorauthority: LifecycleSupervisorAuthority = LifecycleSupervisorAuthority.System
 ) {
-  def run(args: Vector[String]): Int = {
+  def run(args: Vector[String]): Int =
+    _launcher_home(args).fold(_run(args)) { case (home, commandargs) =>
+      new CncfLauncher(paths.copy(home = home), runtimeresolver, cncfinvoker, classpathexporter, processmanager, launcherdevinvoker, environment, registrationreporter, supervisorhost, supervisorauthority).run(commandargs)
+    }
+
+  private def _run(args: Vector[String]): Int = {
     val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
     val config = LauncherConfig.load(paths, configfiles, environment)
       .mergeHigher(LauncherConfig(cncfConfigFiles = cncfconfigfiles))
@@ -64,6 +69,18 @@ final class CncfLauncher(
       case dev: CncfCommand.Dev =>
         _run_dev(dev, configfiles, cncfconfigfiles)
     }
+  }
+
+  private def _launcher_home(args: Vector[String]): Option[(Path, Vector[String])] = {
+    val launcherscope = args.take(args.indexOf("--") match {
+      case -1 => args.length
+      case index => index
+    })
+    val index = launcherscope.indexOf("--launcher-home")
+    if (index < 0) None
+    else if (index + 1 >= args.length) throw CncfException("--launcher-home requires a directory")
+    else if (launcherscope.indexOf("--launcher-home", index + 1) >= 0) throw CncfException("--launcher-home may be specified only once")
+    else Some(paths.cwd.resolve(args(index + 1)).normalize.toAbsolutePath.normalize -> (args.take(index) ++ args.drop(index + 2)))
   }
 
   private def _run_repository(command: CncfCommand.Repository): Int = {
