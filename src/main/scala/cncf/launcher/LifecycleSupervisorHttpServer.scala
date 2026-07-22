@@ -31,8 +31,20 @@ final class LifecycleSupervisorHttpServer(
   def start(port: Int): HttpServer = {
     val server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0)
     server.createContext("/v1/lifecycle-requests", _handler)
+    server.createContext("/v1/lifecycle-health", _health_handler)
     server.start()
     server
+  }
+
+  private val _health_handler = new HttpHandler {
+    def handle(exchange: HttpExchange): Unit =
+      if (
+        exchange.getRequestMethod == "GET" &&
+        Option(exchange.getRequestHeaders.getFirst("Authorization")).contains(s"Bearer $token")
+      )
+        _write(exchange, 200, s"{\"supervisorId\":\"$supervisorid\",\"state\":\"available\"}")
+      else
+        _write(exchange, 400, "{\"state\":\"rejected\",\"diagnosticCode\":\"supervisor-request-invalid\"}")
   }
 
   private val _handler = new HttpHandler {

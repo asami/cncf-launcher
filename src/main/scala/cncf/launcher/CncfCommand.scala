@@ -100,6 +100,13 @@ object CncfCommand {
     final case class Show(instanceId: String, format: String) extends Evidence
   }
 
+  sealed trait Lifecycle extends CncfCommand
+  object Lifecycle {
+    case object Ensure extends Lifecycle
+    final case class Submit(request: LifecycleSupervisorRequest) extends Lifecycle
+    final case class Lookup(requestId: String) extends Lifecycle
+  }
+
 
   enum DevTarget {
     case ProjectDev(path: Option[String])
@@ -178,6 +185,10 @@ object CncfCommandParser {
     args match {
       case Vector("supervisor", "serve") => CncfCommand.Supervisor.Serve
       case Vector("supervisor") => throw CncfException("cncf launcher supervisor requires serve")
+      case Vector("lifecycle", "ensure") => CncfCommand.Lifecycle.Ensure
+      case Vector("lifecycle", "lookup", requestid) => CncfCommand.Lifecycle.Lookup(_lifecycle_request_id(requestid))
+      case values if values.headOption.contains("lifecycle") && values.drop(1).headOption.contains("submit") => CncfCommand.Lifecycle.Submit(_lifecycle_request(values.drop(2)))
+      case Vector("lifecycle") => throw CncfException("cncf launcher lifecycle requires ensure, submit, or lookup")
       case Vector("evidence", "list", "--format", format) => CncfCommand.Evidence.List(_evidence_format(format))
       case Vector("evidence", "list", value) if value.startsWith("--format=") => CncfCommand.Evidence.List(_evidence_format(value.stripPrefix("--format=")))
       case Vector("evidence", "show", instanceid, "--format", format) => CncfCommand.Evidence.Show(_evidence_instance_id(instanceid), _evidence_format(format))
@@ -191,6 +202,34 @@ object CncfCommandParser {
 
   private def _evidence_instance_id(value: String): String =
     Option(value).map(_.trim).filter(_.nonEmpty).getOrElse(throw CncfException("cncf launcher evidence show requires an instance id"))
+
+  private def _lifecycle_request(values: Vector[String]): LifecycleSupervisorRequest = {
+    if (values.size % 2 != 0) throw CncfException("cncf launcher lifecycle submit requires named arguments")
+    val entries = values.grouped(2).foldLeft(Map.empty[String, String]) { (z, pair) =>
+      val key = pair.head
+      val value = pair(1)
+      if (!key.startsWith("--") || z.contains(key)) throw CncfException("cncf launcher lifecycle submit arguments are invalid")
+      z.updated(key, value)
+    }
+    val allowed = Set("--request-id", "--idempotency-key", "--artifact-id", "--action", "--operator-subject-id", "--deadline-at")
+    if (entries.keySet != allowed) throw CncfException("cncf launcher lifecycle submit arguments are invalid")
+    val action = LifecycleAction.parse(entries("--action")).getOrElse(throw CncfException("cncf launcher lifecycle action is invalid"))
+    val deadline = scala.util.Try(java.time.Instant.parse(entries("--deadline-at"))).toOption.getOrElse(throw CncfException("cncf launcher lifecycle deadline is invalid"))
+    LifecycleSupervisorRequest(
+      _lifecycle_required(entries, "--request-id"),
+      _lifecycle_required(entries, "--idempotency-key"),
+      _lifecycle_required(entries, "--artifact-id"),
+      action,
+      _lifecycle_required(entries, "--operator-subject-id"),
+      deadline
+    )
+  }
+
+  private def _lifecycle_request_id(value: String): String =
+    Option(value).map(_.trim).filter(_.nonEmpty).getOrElse(throw CncfException("cncf launcher lifecycle lookup requires a request id"))
+
+  private def _lifecycle_required(values: Map[String, String], key: String): String =
+    Option(values(key)).map(_.trim).filter(_.nonEmpty).getOrElse(throw CncfException("cncf launcher lifecycle submit arguments are invalid"))
 
   private def _parse_repository(args: Vector[String]): CncfCommand.Repository = {
     if (args.isEmpty) throw CncfException("cncf repository requires list or show")
@@ -693,7 +732,9 @@ object CncfCommandParser {
       |  cncf launcher version
       |  cncf launcher evidence list --format json
       |  cncf launcher evidence show <instance-id> --format json
-      |  cncf launcher supervisor serve
+      |  cncf launcher lifecycle ensure
+      |  cncf launcher lifecycle submit --request-id <id> --idempotency-key <key> --artifact-id <artifact> --action <start|stop|restart> --operator-subject-id <subject> --deadline-at <instant>
+      |  cncf launcher lifecycle lookup <request-id>
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] install-cli <command-base-name> [--project-dev <dir>] [--component-dev-dir <dir>...] [--operation-prefix <component.service>] [--file-param <name>...] [--bin-dir <dir>] [--overwrite]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> command <operation> [args...]
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> server [args...]
@@ -732,7 +773,7 @@ object CncfCommandParser {
       |  CNCF_RUNTIME_DEV_DIR directly selects a local CNCF runtime checkout.
       |  CNCF_LAUNCHER_DEV_DIR directly selects a local cncf-launcher checkout.
       |  cncf launcher evidence projects Launcher-owned shared server evidence without starting a service; list omits development directories and show returns one protected local-detail record.
-      |  cncf launcher supervisor serve starts the authenticated lifecycle supervisor on loopback using ~/.cncf/launcher/supervisor.yaml.
+      |  cncf launcher lifecycle internally ensures the authenticated local lifecycle authority using ~/.cncf/launcher/supervisor.yaml. The foreground supervisor serve command is diagnostic-only and is not required for cncf server or Control Center operations.
       |  Config development.enabled=true activates development.launcher.dev-dir and development.runtime.dev-dir.
       |  Config development.launcher.enabled and development.runtime.enabled override the common development switch independently.
       |  An enabled development selection requires its dev-dir unless a direct environment override supplies one.

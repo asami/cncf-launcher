@@ -44,7 +44,26 @@ value is an environment-variable name, never a token value. Unknown keys or an
 invalid daemon declaration make the configuration unavailable rather than
 falling back to a default endpoint or credential.
 
-## Internal Foreground Daemon
+## Internal Authority and Diagnostic Foreground Daemon
+
+`cncf launcher lifecycle ensure`, `submit`, and `lookup` are Launcher-internal
+Control Center adapters. They resolve the private profile and environment-only
+credential, then first probe the authenticated loopback authority. When it is
+absent, Launcher starts the foreground host implementation in the background,
+waits for its authenticated health response within a bounded interval, and
+only then submits or looks up a request. Its log is retained at
+`~/.cncf/launcher/supervisor.log`.
+
+The authority readiness interval is bounded to ten seconds. The Control Center
+adapter reserves at least twenty seconds for this readiness interval plus the
+bounded lifecycle submission, so a normal cold start is not rejected merely
+because the authority did not already exist.
+
+This is an implementation detail, not an additional operator workflow. The
+normal public starts remain `cncf server` from a development directory and
+`textus <artifact> server`. Control Center receives only the safe command
+result; it neither reads the private configuration/state files nor knows the
+endpoint, credential, or authority PID.
 
 The standalone host command is retained for implementation diagnostics:
 
@@ -52,7 +71,8 @@ The standalone host command is retained for implementation diagnostics:
 cncf launcher supervisor serve
 ```
 
-It is not the normal launcher interface and must not replace the canonical
+It is not the normal launcher interface, is never a Control Center
+prerequisite, and must not replace the canonical
 development-directory invocation:
 
 ```text
@@ -78,8 +98,8 @@ The supervisor persists its request/idempotency and owned-instance records in
 request and its safe result; it contains no credential, directory, command, or
 PID. Records are written atomically before the HTTP response is returned.
 
-`GET /v1/lifecycle-requests/{requestId}` returns the same safe result to an
-authenticated local caller. A supervisor restart reloads completed/rejected
+Launcher uses `GET /v1/lifecycle-requests/{requestId}` internally to return
+the same safe result to its bounded caller. A supervisor restart reloads completed/rejected
 records for retry and reconciliation, but it never reconstructs process
 ownership from a persisted PID, port, command line, or process-table search.
 

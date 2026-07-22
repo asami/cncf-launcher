@@ -22,7 +22,8 @@ final class CncfLauncher(
   launcherdevinvoker: LauncherDevInvoker = LauncherDevInvoker.System,
   environment: Map[String, String] = sys.env,
   registrationreporter: CncfTextusControlCenterRegistrationReporter = CncfTextusControlCenterRegistrationReporter.System,
-  supervisorhost: LifecycleSupervisorDaemonHost = LifecycleSupervisorDaemonHost.System
+  supervisorhost: LifecycleSupervisorDaemonHost = LifecycleSupervisorDaemonHost.System,
+  supervisorauthority: LifecycleSupervisorAuthority = LifecycleSupervisorAuthority.System
 ) {
   def run(args: Vector[String]): Int = {
     val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
@@ -52,6 +53,8 @@ final class CncfLauncher(
         _run_repository(repository)
       case supervisor: CncfCommand.Supervisor =>
         _run_supervisor(supervisor)
+      case lifecycle: CncfCommand.Lifecycle =>
+        _run_lifecycle(lifecycle)
       case evidence: CncfCommand.Evidence =>
         _run_evidence(evidence)
       case install: CncfCommand.InstallCli =>
@@ -88,6 +91,46 @@ final class CncfLauncher(
           )(token => supervisorhost.serve(configuration, token, paths))
         })
     }
+
+  private def _run_lifecycle(command: CncfCommand.Lifecycle): Int = {
+    import LifecycleSupervisorProtocol.given
+    import io.circe.syntax.*
+    def configuration: Either[String, (LifecycleSupervisorDaemonConfiguration, String)] =
+      LifecycleSupervisorDaemonConfiguration.resolve(paths).flatMap { value =>
+        environment.get(value.tokenEnv).filter(_.nonEmpty).toRight(LifecycleSupervisorDaemonConfiguration.CREDENTIAL_UNAVAILABLE).map(value -> _)
+      }
+    def unavailable(request: LifecycleSupervisorRequest, code: String): Int = {
+      println(LifecycleSupervisorProtocol.rejected(request, "", code).asJson.noSpaces)
+      0
+    }
+    command match {
+      case CncfCommand.Lifecycle.Ensure =>
+        configuration.fold(code => throw CncfException(code), { case (value, token) =>
+          supervisorauthority.ensure(value, token, paths).fold(code => throw CncfException(code), _ => {
+            println(s"{\"supervisorId\":\"${value.supervisorId}\",\"state\":\"available\"}")
+            0
+          })
+        })
+      case CncfCommand.Lifecycle.Submit(request) =>
+        configuration.fold(code => unavailable(request, code), { case (value, token) =>
+          supervisorauthority.ensure(value, token, paths).fold(code => unavailable(request, code), _ =>
+            LifecycleSupervisorHttpClient.submit(value, token, request).fold(code => unavailable(request, code), { result =>
+              println(result.asJson.noSpaces)
+              0
+            })
+          )
+        })
+      case CncfCommand.Lifecycle.Lookup(requestid) =>
+        configuration.fold(code => throw CncfException(code), { case (value, token) =>
+          supervisorauthority.ensure(value, token, paths).fold(code => throw CncfException(code), _ =>
+            LifecycleSupervisorHttpClient.lookup(value, token, requestid).fold(1) { result =>
+              println(result.asJson.noSpaces)
+              0
+            }
+          )
+        })
+    }
+  }
 
   private def _run_evidence(command: CncfCommand.Evidence): Int = {
     import CncfLocalServerEvidenceSnapshot.given

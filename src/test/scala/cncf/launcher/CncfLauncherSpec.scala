@@ -1,3 +1,6 @@
+/*
+ * @version Jul. 22, 2026
+ */
 package cncf.launcher
 
 import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
@@ -125,6 +128,8 @@ object CncfLauncherSpec {
     spec.lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted()
     spec.lifecycleSupervisorDaemonUsesPrivateLoopbackConfiguration()
     spec.lifecycleSupervisorDaemonRejectsUnsafeConfigurationOrCredential()
+    spec.lifecycleSupervisorLifecycleCommandUsesInternalAuthority()
+    spec.lifecycleSupervisorAuthorityWaitsForColdStart()
     spec.lifecycleSupervisorDaemonHostBindsLoopbackUntilInterrupted()
     spec.lifecycleSupervisorDaemonClosesListenerWhenShutdownHookRegistrationFails()
     spec.latestRuntimeIsConcrete()
@@ -247,6 +252,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       "fail closed after it cannot persist a stopped-child restart failure" in {
         lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted()
+      }
+
+      "submit lifecycle work only after the Launcher-internal authority boundary is ensured" in {
+        lifecycleSupervisorLifecycleCommandUsesInternalAuthority()
+      }
+
+      "wait for a cold local authority before declaring the bounded lifecycle path unavailable" in {
+        lifecycleSupervisorAuthorityWaitsForColdStart()
       }
 
       "start the foreground daemon from private loopback configuration" in {
@@ -3511,6 +3524,99 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     Then("it releases the loopback port and preserves the unrecoverable hook failure")
     error.getMessage shouldBe "shutdown unavailable"
+  }
+
+  def lifecycleSupervisorLifecycleCommandUsesInternalAuthority(): Unit = _with_temp_paths { paths =>
+    Given("a configured local profile, a running loopback authority, and an injected internal authority ensurer")
+    val project = paths.cwd.resolve("component")
+    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
+    val listener = new ServerSocket(0)
+    val port = listener.getLocalPort
+    listener.close()
+    _write(paths.supervisorConfig, _supervisor_yaml("local-supervisor", port, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN") + s"""profiles:
+      |  development-directory:
+      |    textus-control-center: ${project.toAbsolutePath}
+      |""".stripMargin)
+    val child = new LifecycleSupervisorChild {
+      val instanceId = "lifecycle-instance"
+      var alive = true
+      def isAlive = alive
+      def stop() = { alive = false; true }
+    }
+    val authorityserver = LifecycleSupervisorHttpServer(
+      "local-supervisor",
+      "private-token",
+      LifecycleSupervisorProfileResolver(paths),
+      Some(LifecycleSupervisorStateStore(paths, "local-supervisor")),
+      new LifecycleSupervisorChildFactory { def start(profile: LifecycleSupervisorLaunchProfile) = Right(child) }
+    ).start(port)
+    var ensured = Vector.empty[(LifecycleSupervisorDaemonConfiguration, String)]
+    val authority = new LifecycleSupervisorAuthority {
+      def ensure(configuration: LifecycleSupervisorDaemonConfiguration, token: String, launcherpaths: LauncherPaths) = {
+        ensured :+= configuration -> token
+        Right(())
+      }
+    }
+    val output = new java.io.ByteArrayOutputStream()
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      FakeInvoker(),
+      environment = Map("CNCF_LIFECYCLE_SUPERVISOR_TOKEN" -> "private-token"),
+      supervisorauthority = authority
+    )
+    try {
+      When("Control Center's bounded lifecycle command submits a start request")
+      val code = Console.withOut(new java.io.PrintStream(output)) {
+        launcher.run(Vector(
+          "launcher", "lifecycle", "submit",
+          "--request-id", "request-1",
+          "--idempotency-key", "key-1",
+          "--artifact-id", "textus-control-center",
+          "--action", "start",
+          "--operator-subject-id", "operator-1",
+          "--deadline-at", java.time.Instant.now().plusSeconds(60).toString
+        ))
+      }
+
+      Then("it first ensures Launcher authority and returns only the safe lifecycle result")
+      code shouldBe 0
+      ensured shouldBe Vector(LifecycleSupervisorDaemonConfiguration("local-supervisor", port, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN") -> "private-token")
+      output.toString(StandardCharsets.UTF_8) should include("\"requestId\":\"request-1\"")
+      output.toString(StandardCharsets.UTF_8) should include("\"instanceId\":\"lifecycle-instance\"")
+      CncfCommandParser.parse(Vector("launcher", "lifecycle", "lookup", "request-1")) shouldBe CncfCommand.Lifecycle.Lookup("request-1")
+    } finally authorityserver.stop(0)
+  }
+
+  def lifecycleSupervisorAuthorityWaitsForColdStart(): Unit = _with_temp_paths { paths =>
+    Given("a local authority that becomes reachable only after its process has been started")
+    val configuration = LifecycleSupervisorDaemonConfiguration("local-supervisor", 18014, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN")
+    var probes = 0
+    var starts = 0
+    val authority = new LocalLifecycleSupervisorAuthority(
+      new LifecycleSupervisorAuthorityProbe {
+        def available(value: LifecycleSupervisorDaemonConfiguration, token: String) = {
+          probes += 1
+          probes >= 4
+        }
+      },
+      new LifecycleSupervisorAuthorityProcess {
+        def start(value: LifecycleSupervisorDaemonConfiguration, token: String, launcherpaths: LauncherPaths) = {
+          starts += 1
+          Right(())
+        }
+      },
+      attempts = 5,
+      retrydelay = 0
+    )
+
+    When("the bounded lifecycle path ensures the cold authority")
+    val result = authority.ensure(configuration, "private-token", paths)
+
+    Then("it starts once and waits through readiness probes instead of rejecting immediately")
+    result shouldBe Right(())
+    starts shouldBe 1
+    probes shouldBe 4
   }
 
   def noCncfRuntimeLibraryDependencies(): Unit = {
