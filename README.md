@@ -101,10 +101,9 @@ repository/local artifact, `--car-file <file>` for a direct CAR/SAR file, or
 directory. Target options are mutually exclusive.
 
 The main target uses `target/cncf.d/runtime-classpath.txt`. If the file is
-missing or empty, deprecated `cncf dev server`, `cncf dev client`, `cncf dev command`, and
-`cncf dev server-emulation` prepare it automatically from `Runtime /
-fullClasspath`. Use `cncf dev classpath --project-dev <dir>` to prepare it
-manually.
+missing or empty, a development server/client/command invocation reports the
+missing classpath and does not start SBT. Use `cncf dev classpath --project-dev
+<dir>` as an explicit preparation step.
 
 Dependency components are separate from the main target. Use
 `--component-dev-dir <dir>` or `conf/cncf/launcher.yaml` `dev.component-dev-dirs` for
@@ -237,6 +236,11 @@ credential named by `token-env`; it never writes or prints the credential
 value. Requests use the configured bounded timeout. Missing credentials,
 authorization rejection, and Textus Control Center outages emit a sanitized warning but
 do not prevent the target server from starting.
+
+Registration is an observation channel, not lifecycle authority. Reopened
+Phase 4 moves lifecycle ownership to `textus-supervisor`; launcher evidence and
+notification remain best effort and never make Control Center availability a
+canonical `cncf server` prerequisite.
 
 When `base-url` is omitted, registration waits until the CNCF runtime has bound
 and uses its actual loopback endpoint. This includes additional instances

@@ -10,7 +10,7 @@ import io.circe.syntax.*
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -32,8 +32,9 @@ final class CncfLauncher(
 
   private def _run(args: Vector[String]): Int = {
     val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
+    val effectivecncfconfigfiles = _implicit_control_center_config(commandargs, cncfconfigfiles)
     val config = LauncherConfig.load(paths, configfiles, environment)
-      .mergeHigher(LauncherConfig(cncfConfigFiles = cncfconfigfiles))
+      .mergeHigher(LauncherConfig(cncfConfigFiles = effectivecncfconfigfiles))
     _delegate_launcher_dev_dir(config, args) match {
       case Some(code) => return code
       case None => ()
@@ -422,22 +423,26 @@ final class CncfLauncher(
     config: LauncherConfig
   ): Int = {
     val store = RuntimeVersionStore(paths)
-    val runtimeversion = command.runtimeDevDir.orElse(config.runtimeDevDir) match {
+    val developmentproject = _current_project_development_runtime(command)
+    val runtimeversion = developmentproject.orElse(command.runtimeDevDir.map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)).orElse(config.runtimeDevDir.map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)) match {
+      case Some(project) if developmentproject.contains(project) =>
+        _development_runtime_version_from_classpath(project)
       case Some(dir) =>
-        _development_runtime_version(paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
+        _development_runtime_version(dir)
       case None =>
         runtimeresolver.resolveVersion(store.current(command.runtimeVersion, config), config, paths)
     }
-    val classpath = command.runtimeDevDir.orElse(config.runtimeDevDir) match {
+    val classpath = developmentproject.orElse(command.runtimeDevDir.map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)).orElse(config.runtimeDevDir.map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)) match {
       case Some(dir) =>
         DevSupport(paths, classpathexporter, processmanager)
-          .cncfRuntimeClasspath(paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
+          .cncfRuntimeClasspath(dir)
       case None =>
         runtimeresolver.resolve(runtimeversion, config, paths)
     }
+    val effectivecommand = command.copy(args = _development_server_args(command))
     val report = _server_report(command, runtimeversion)
     val evidencesession = report.map(_local_evidence_session).getOrElse(CncfLocalServerEvidenceSession.noop)
-    val registrationsession = report.map(_registration_session(command, config, _)).getOrElse(CncfTextusControlCenterRegistrationSession.noop)
+    val registrationsession = report.map(_registration_session(effectivecommand, config, _)).getOrElse(CncfTextusControlCenterRegistrationSession.noop)
     val shutdownhook = new Thread(
       () => {
         registrationsession.close()
@@ -447,12 +452,77 @@ final class CncfLauncher(
     )
     Runtime.getRuntime.addShutdownHook(shutdownhook)
     try {
-      cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ _runtime_command_args(command.args))
+      cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ _runtime_command_args(effectivecommand.args))
     } finally {
       scala.util.Try(Runtime.getRuntime.removeShutdownHook(shutdownhook))
       registrationsession.close()
       evidencesession.close()
     }
+  }
+
+  private def _current_project_development_runtime(command: CncfCommand.Execute): Option[Path] =
+    if (
+      command.args.headOption.contains("server") &&
+      Files.isRegularFile(paths.cwd.resolve("build.sbt")) &&
+      Files.isRegularFile(paths.cwd.resolve("project.yaml"))
+    )
+      Some(paths.cwd.toAbsolutePath.normalize)
+    else
+      None
+
+  private def _implicit_control_center_config(
+    commandargs: Vector[String],
+    explicit: Vector[String]
+  ): Vector[String] = {
+    val file = paths.cncfHome.resolve("textus-control-center/server-config.yaml")
+    if (
+      commandargs.headOption.contains("server") &&
+      _project_artifact_id(paths.cwd.toAbsolutePath.normalize).contains("textus-control-center") &&
+      Files.isRegularFile(file) &&
+      !explicit.contains(file.toString)
+    )
+      Vector(file.toString) ++ explicit
+    else
+      explicit
+  }
+
+  private def _development_server_args(command: CncfCommand.Execute): Vector[String] =
+    _current_project_development_runtime(command).fold(command.args) { project =>
+      val descriptor = project.resolve("conf/cncf/assembly-standalone.yaml")
+      val hasdescriptor = command.args.exists(_.startsWith("--textus.assembly.descriptor"))
+      val hasport = command.args.exists(_.startsWith("--cncf.server.port"))
+      val descriptorargs =
+        if (Files.isRegularFile(descriptor) && !hasdescriptor)
+          Vector(s"--textus.assembly.descriptor=${descriptor.toString}")
+        else
+          Vector.empty
+      val portargs =
+        if (!hasport) _project_default_port(project).toVector.map(port => s"--cncf.server.port=$port")
+        else Vector.empty
+      val serverindex = command.args.indexOf("server")
+      if (serverindex < 0)
+        command.args
+      else
+        command.args.take(serverindex) ++ descriptorargs ++ portargs ++ command.args.drop(serverindex)
+    }
+
+  private def _project_default_port(project: Path): Option[String] = {
+    val file = project.resolve("project.yaml")
+    scala.util.Try {
+      LauncherConfigParser.parse(file, Files.readString(file, StandardCharsets.UTF_8))
+        .get("project.component.config.textus.server.default-port")
+        .flatMap(_.headOption)
+        .map(_.trim)
+        .filter(_.matches("[0-9]+"))
+    }.toOption.flatten
+  }
+
+  private def _development_runtime_version_from_classpath(project: Path): String = {
+    val classpath = DevSupport(paths, classpathexporter, processmanager).cncfRuntimeClasspath(project)
+    classpath.collectFirst {
+      case entry if entry.getFileName.toString == "goldenport-cncf_3.jar" =>
+        Option(entry.getParent).flatMap(parent => Option(parent.getParent)).map(_.getFileName.toString)
+    }.flatten.getOrElse(_development_runtime_version(project))
   }
 
   private def _server_report(

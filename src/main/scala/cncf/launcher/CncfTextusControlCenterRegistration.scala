@@ -8,7 +8,7 @@ import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 19, 2026
+ * @version Jul. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfTextusControlCenterRegistrationConfig(
@@ -115,16 +115,21 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
     report: CncfTextusControlCenterRegistrationReport,
     token: String
   ): CncfTextusControlCenterRegistrationSession = {
-    _request_best_effort(config, report, token, "register-subsystem", "starting")
+    val registered = new AtomicBoolean(_request_best_effort(config, report, token, "register-subsystem", "starting"))
     val executor = Executors.newSingleThreadScheduledExecutor(_daemon_thread_factory)
     val task = new Runnable {
       def run(): Unit =
-        _request_best_effort(config, report, token, "heartbeat-subsystem", "running")
+        if (registered.get) {
+          if (!_request_best_effort(config, report, token, "heartbeat-subsystem", "running"))
+            registered.set(false)
+        } else {
+          registered.set(_request_best_effort(config, report, token, "register-subsystem", "starting"))
+        }
     }
     executor.scheduleAtFixedRate(task, config.heartbeatInterval.toMillis, config.heartbeatInterval.toMillis, TimeUnit.MILLISECONDS)
     ActiveCncfTextusControlCenterRegistrationSession(
       executor,
-      () => _request_best_effort(config, report, token, "deregister-subsystem", "stopped")
+      () => if (registered.get) _request_best_effort(config, report, token, "deregister-subsystem", "stopped")
     )
   }
 
@@ -164,13 +169,19 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
     token: String,
     operation: String,
     state: String
-  ): Unit =
+  ): Boolean =
     try {
       val status = _request(config, report, token, operation, state)
-      if (status < 200 || status >= 300)
+      if (status < 200 || status >= 300) {
         _warning(s"$operation request to ${_operation_endpoint(config, operation)} returned HTTP $status")
+        false
+      } else {
+        true
+      }
     } catch {
-      case _: Throwable => _warning(s"$operation connection to ${_operation_endpoint(config, operation)} failed")
+      case _: Throwable =>
+        _warning(s"$operation connection to ${_operation_endpoint(config, operation)} failed")
+        false
     }
 
   private def _request(

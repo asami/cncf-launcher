@@ -9,7 +9,8 @@ import scala.sys.process.*
 
 /*
  * @since   May. 17, 2026
- * @version Jun.  8, 2026
+ *  version Jun.  8, 2026
+ * @version Jul. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
@@ -237,7 +238,7 @@ final class DevSupport(
     if (!context.useProjectClasspath) {
       Vector.empty
     } else if (!Files.isRegularFile(context.classpathFile) || Files.size(context.classpathFile) == 0L)
-      _runtime_classpath_auto(context)
+      throw CncfException(s"development runtime classpath not found: ${context.classpathFile}; prepare it before invoking cncf")
     else {
       _classpath_entries(Files.readString(context.classpathFile, StandardCharsets.UTF_8).trim)
     }
@@ -249,10 +250,7 @@ final class DevSupport(
       if (Files.isRegularFile(file) && Files.size(file) > 0L) {
         Files.readString(file, StandardCharsets.UTF_8).trim
       } else {
-        val exported = classpathexporter.exportRuntimeClasspath(runtimeproject)
-        Files.createDirectories(file.getParent)
-        Files.writeString(file, exported + "\n", StandardCharsets.UTF_8)
-        exported
+        throw CncfException(s"development runtime classpath not found: ${file}; prepare it before invoking cncf")
       }
     val entries = _classpath_entries(classpath)
     if (entries.isEmpty)
@@ -389,9 +387,9 @@ final class DevSupport(
 
   private def _check_classpath(context: DevContext): Vector[DevCheckItem] =
     if (!Files.isRegularFile(context.classpathFile)) {
-      Vector(DevCheckItem.warning("runtime-classpath", s"missing ${context.classpathFile}; dev server will run cncf dev classpath automatically"))
+      Vector(DevCheckItem.error("runtime-classpath", s"missing ${context.classpathFile}; prepare the development runtime classpath before invoking cncf"))
     } else if (Files.size(context.classpathFile) == 0L) {
-      Vector(DevCheckItem.warning("runtime-classpath", s"empty ${context.classpathFile}; dev server will run cncf dev classpath automatically"))
+      Vector(DevCheckItem.error("runtime-classpath", s"empty ${context.classpathFile}; prepare the development runtime classpath before invoking cncf"))
     } else {
       val entries = runtimeClasspath(context)
       val directories = entries.filter(Files.isDirectory(_))
@@ -526,26 +524,6 @@ final class DevSupport(
       processmanager.processStartedAt(state.pid).contains(expected)
     }
 
-  private def _runtime_classpath_auto(
-    context: DevContext
-  ): Vector[Path] = {
-    try {
-      writeRuntimeClasspath(context)
-      runtimeClasspath(context)
-    } catch {
-      case e: CncfException =>
-        throw CncfException(
-          s"failed to prepare main target runtime classpath for ${context.project}; run cncf dev classpath --project-dev ${context.project}. cause=${e.getMessage}",
-          e.code
-        )
-      case e: Throwable =>
-        throw CncfException(
-          s"failed to prepare main target runtime classpath for ${context.project}; run cncf dev classpath --project-dev ${context.project}. cause=${e.getMessage}",
-          2
-        )
-    }
-  }
-
   private def _check_runtime_dev_dir(dir: Path): Vector[DevCheckItem] = {
     val file = DevSupport.runtimeClasspathFile(dir)
     if (!Files.isDirectory(dir)) {
@@ -553,7 +531,7 @@ final class DevSupport(
     } else if (Files.isRegularFile(file) && Files.size(file) > 0L) {
       Vector(DevCheckItem.ok("runtime-dev-dir", s"${dir} (${file})"))
     } else {
-      Vector(DevCheckItem.warning("runtime-dev-dir", s"${dir} missing ${file}; dev invocation will run sbt export Runtime / fullClasspath"))
+      Vector(DevCheckItem.error("runtime-dev-dir", s"${dir} missing ${file}; prepare the development runtime classpath before invoking cncf"))
     }
   }
 

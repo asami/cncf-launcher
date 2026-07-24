@@ -1,14 +1,20 @@
-# Standalone Lifecycle Supervisor
+# Provisional Launcher Lifecycle Supervisor
 
-status = in_progress
-scope = Textus Control Center Phase 4
+status = superseded-by-phase-4-reopen
+scope = Textus Control Center Phase 4 transition baseline
 
-`cncf-launcher` owns lifecycle request records and only controls child servers
-that it started. It loads its configuration and durable state from the
-launcher-owned CNCF home, normally `~/.cncf/`; Control Center never reads those
-files directly.
+This document records the provisional launcher-private supervisor behavior.
+It is not the accepted Phase 4 target: `textus-supervisor` becomes lifecycle
+authority, embedded by Textus Control Center for standalone use and separately
+placeable for future distributed operation. `cncf-launcher` retains durable
+common evidence and bounded best-effort notification; it must not own new
+lifecycle request, child-ownership, or supervisor configuration state.
 
-## Standalone Profile Configuration
+The remaining sections describe only the transition baseline that must be
+removed or reduced to a compatibility adapter. They are not a contract for new
+implementation.
+
+## Transition-Baseline Profile Configuration
 
 The standalone supervisor reads its authority configuration from exactly one
 private file: `~/.cncf/launcher/supervisor.yaml`.

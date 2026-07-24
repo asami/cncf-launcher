@@ -1,6 +1,3 @@
-/*
- * @version Jul. 22, 2026
- */
 package cncf.launcher
 
 import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
@@ -22,7 +19,7 @@ import LifecycleSupervisorStateStore.given
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 24, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -51,6 +48,7 @@ object CncfLauncherSpec {
     spec.installCliPinsDevelopmentRuntimeWithoutCatalog()
     spec.installCliRejectsIncompatibleDevelopmentRuntime()
     spec.textusControlCenterRegistrationLifecycle()
+    spec.controlCenterConfigAppliesOnlyToCurrentProject()
     spec.localServerEvidenceProjection()
     spec.localServerEvidenceRetentionAndRecovery()
     spec.standaloneControlCenterLocatorLifecycle()
@@ -93,10 +91,10 @@ object CncfLauncherSpec {
     spec.devHelpExplainsResolutionModel()
     spec.devCheckReportsMainTargetAndDependencyResolution()
     spec.devCheckReportsDevServerState()
-    spec.devCheckTreatsMissingMainTargetClasspathAsWarning()
+    spec.devCheckTreatsMissingMainTargetClasspathAsError()
     spec.devCheckTreatsMissingDependencyClasspathAsError()
-    spec.devServerAutoGeneratesMainTargetClasspath()
-    spec.devServerReportsMainTargetClasspathExportFailure()
+    spec.devServerRequiresPreparedMainTargetClasspath()
+    spec.runtimeDevelopmentRequiresPreparedClasspath()
     spec.devUsesCurrentCompatibleRuntimeByDefault()
     spec.devCanSelectLatestTestedRuntime()
     spec.devCanSelectLatestCompatibleRuntime()
@@ -147,29 +145,33 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "parser" in {
         Given("the cncf launcher scenario: parser")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(parser())
         Then("the executable specification holds through scenario-specific expectations")
-        parser()
+        outcome.get shouldBe ()
       }
 
       "runtime catalog parse and selector resolution" in {
         Given("the cncf launcher scenario: runtime catalog parse and selector resolution")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeCatalogParseAndSelectorResolution())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeCatalogParseAndSelectorResolution()
+        outcome.get shouldBe ()
       }
 
       "dev parser" in {
         Given("the cncf launcher scenario: dev parser")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devParser())
         Then("the executable specification holds through scenario-specific expectations")
-        devParser()
+        outcome.get shouldBe ()
       }
 
       "dev server parser supports process management options" in {
         Given("the cncf launcher scenario: dev server parser supports process management options")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerParserSupportsProcessManagementOptions())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerParserSupportsProcessManagementOptions()
+        outcome.get shouldBe ()
       }
 
     }
@@ -294,50 +296,57 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "launcher version" in {
         Given("the cncf launcher scenario: launcher version")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(launcherVersion())
         Then("the executable specification holds through scenario-specific expectations")
-        launcherVersion()
+        outcome.get shouldBe ()
       }
 
       "config merge" in {
         Given("the cncf launcher scenario: config merge")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(configMerge())
         Then("the executable specification holds through scenario-specific expectations")
-        configMerge()
+        outcome.get shouldBe ()
       }
 
       "launcher dev dir delegates to development launcher" in {
         Given("the cncf launcher scenario: launcher dev dir delegates to development launcher")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(launcherDevDirDelegatesToDevelopmentLauncher())
         Then("the executable specification holds through scenario-specific expectations")
-        launcherDevDirDelegatesToDevelopmentLauncher()
+        outcome.get shouldBe ()
       }
 
       "launcher dev dir rejects stale development classpath" in {
         Given("the cncf launcher scenario: launcher dev dir rejects stale development classpath")
         When("the launcher development classpath does not contain the launcher main class")
+        val outcome = scala.util.Try(launcherDevDirRejectsStaleDevelopmentClasspath())
         Then("the launcher reports the stale classpath before spawning the delegated process")
-        launcherDevDirRejectsStaleDevelopmentClasspath()
+        outcome.get shouldBe ()
       }
 
       "config supports additional rdf namespaces" in {
         Given("the cncf launcher scenario: config supports additional rdf namespaces")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(configSupportsAdditionalRdfNamespaces())
         Then("the executable specification holds through scenario-specific expectations")
-        configSupportsAdditionalRdfNamespaces()
+        outcome.get shouldBe ()
       }
 
       "config file option overrides project config" in {
         Given("the cncf launcher scenario: config file option overrides project config")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(configFileOptionOverridesProjectConfig())
         Then("the executable specification holds through scenario-specific expectations")
-        configFileOptionOverridesProjectConfig()
+        outcome.get shouldBe ()
       }
 
       "workspace root config applies to nested cwd" in {
         Given("the cncf launcher scenario: workspace root config applies to nested cwd")
         When("the launcher loads config from a nested sample directory")
+        val outcome = scala.util.Try(workspaceRootConfigAppliesToNestedCwd())
         Then("the executable specification holds through inherited root config")
-        workspaceRootConfigAppliesToNestedCwd()
+        outcome.get shouldBe ()
       }
 
       "launcher config controls development runtime" in {
@@ -347,50 +356,57 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "launcher config supports properties and conf files" in {
         Given("the cncf launcher scenario: launcher config supports properties and conf files")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(launcherConfigSupportsPropertiesAndConfFiles())
         Then("the executable specification holds through scenario-specific expectations")
-        launcherConfigSupportsPropertiesAndConfFiles()
+        outcome.get shouldBe ()
       }
 
       "default runtime config files are forwarded" in {
         Given("the cncf launcher scenario: default runtime config files are forwarded")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(defaultRuntimeConfigFilesAreForwarded())
         Then("the executable specification holds through scenario-specific expectations")
-        defaultRuntimeConfigFilesAreForwarded()
+        outcome.get shouldBe ()
       }
 
       "config file project dev survives target cwd switch" in {
         Given("the cncf launcher scenario: config file project dev survives target cwd switch")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(configFileProjectDevSurvivesTargetCwdSwitch())
         Then("the executable specification holds through scenario-specific expectations")
-        configFileProjectDevSurvivesTargetCwdSwitch()
+        outcome.get shouldBe ()
       }
 
       "cncf config option is forwarded to runtime" in {
         Given("the cncf launcher scenario: cncf config option is forwarded to runtime")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(cncfConfigOptionIsForwardedToRuntime())
         Then("the executable specification holds through scenario-specific expectations")
-        cncfConfigOptionIsForwardedToRuntime()
+        outcome.get shouldBe ()
       }
 
       "config file option requires existing file" in {
         Given("the cncf launcher scenario: config file option requires existing file")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(configFileOptionRequiresExistingFile())
         Then("the executable specification holds through scenario-specific expectations")
-        configFileOptionRequiresExistingFile()
+        outcome.get shouldBe ()
       }
 
       "dev config can select execution profile" in {
         Given("the cncf launcher scenario: dev config can select execution profile")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devConfigCanSelectExecutionProfile())
         Then("the executable specification holds through scenario-specific expectations")
-        devConfigCanSelectExecutionProfile()
+        outcome.get shouldBe ()
       }
 
       "dev project loads target project config" in {
         Given("the cncf launcher scenario: dev project loads target project config")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devProjectLoadsTargetProjectConfig())
         Then("the executable specification holds through scenario-specific expectations")
-        devProjectLoadsTargetProjectConfig()
+        outcome.get shouldBe ()
       }
 
     }
@@ -399,61 +415,73 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "runtime version" in {
         Given("the cncf launcher scenario: runtime version")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeVersion())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeVersion()
+        outcome.get shouldBe ()
       }
 
       "runtime help" in {
         Given("the cncf launcher scenario: runtime help")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeHelp())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeHelp()
+        outcome.get shouldBe ()
       }
 
       "runtime version precedence" in {
         Given("the cncf launcher scenario: runtime version precedence")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeVersionPrecedence())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeVersionPrecedence()
+        outcome.get shouldBe ()
       }
 
       "runtime use writes expected files" in {
         Given("the cncf launcher scenario: runtime use writes expected files")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeUseWritesExpectedFiles())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeUseWritesExpectedFiles()
+        outcome.get shouldBe ()
       }
 
       "runtime use auto selects project when cncf directory exists" in {
         Given("the cncf launcher scenario: runtime use auto selects project when cncf directory exists")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeUseAutoSelectsProjectWhenCncfDirectoryExists())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
+        outcome.get shouldBe ()
       }
 
       "install cli writes development command" in {
         Given("the cncf launcher scenario: install cli writes development command")
         When("the launcher installs a development command")
+        val outcome = scala.util.Try(installCliWritesDevelopmentCommand())
         Then("the command delegates to cncf target-first command with file parameter expansion")
-        installCliWritesDevelopmentCommand()
+        outcome.get shouldBe ()
       }
 
       "install cli pins an explicit development runtime without a runtime catalog" in {
         Given("a development runtime and component requirements with compatible mixed minimum versions")
         When("the launcher installs a development command")
+        val outcome = scala.util.Try(installCliPinsDevelopmentRuntimeWithoutCatalog())
         Then("the wrapper pins the runtime directory without selecting from the normal catalog")
-        installCliPinsDevelopmentRuntimeWithoutCatalog()
+        outcome.get shouldBe ()
       }
 
       "install cli rejects an explicit incompatible development runtime" in {
         Given("a development runtime below the target component minimum version")
         When("the launcher installs a development command")
+        val outcome = scala.util.Try(installCliRejectsIncompatibleDevelopmentRuntime())
         Then("the incompatible runtime is rejected before a wrapper is written")
-        installCliRejectsIncompatibleDevelopmentRuntime()
+        outcome.get shouldBe ()
       }
 
       "canonical server commands report one Textus Control Center lifecycle" in {
         textusControlCenterRegistrationLifecycle()
+      }
+
+      "Control Center configuration applies only to the current project server" in {
+        controlCenterConfigAppliesOnlyToCurrentProject()
       }
 
       "retain bounded shared evidence and preserve malformed evidence for recovery" in {
@@ -475,8 +503,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "target-first execution delegates to runtime" in {
         Given("the cncf launcher scenario: target-first execution delegates to runtime")
         When("the launcher receives canonical target-first syntax")
+        val outcome = scala.util.Try(executeTargetFirstDelegatesToRuntime())
         Then("the runtime receives expanded runtime activation arguments")
-        executeTargetFirstDelegatesToRuntime()
+        outcome.get shouldBe ()
       }
 
       "server execution delegates default port resolution to the runtime" in {
@@ -486,43 +515,49 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "runtime catalog commands" in {
         Given("the cncf launcher scenario: runtime catalog commands")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeCatalogCommands())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeCatalogCommands()
+        outcome.get shouldBe ()
       }
 
       "runtime current warns when cached recommended is stale" in {
         Given("the cncf launcher scenario: runtime current warns when cached recommended is stale")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeCurrentWarnsWhenCachedRecommendedIsStale())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeCurrentWarnsWhenCachedRecommendedIsStale()
+        outcome.get shouldBe ()
       }
 
       "runtime descriptor commands" in {
         Given("the cncf launcher scenario: runtime descriptor commands")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeDescriptorCommands())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeDescriptorCommands()
+        outcome.get shouldBe ()
       }
 
       "runtime descriptor prefers runtime jar descriptor" in {
         Given("the cncf launcher scenario: runtime descriptor prefers runtime jar descriptor")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeDescriptorPrefersRuntimeJarDescriptor())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeDescriptorPrefersRuntimeJarDescriptor()
+        outcome.get shouldBe ()
       }
 
       "runtime command does not load cncf" in {
         Given("the cncf launcher scenario: runtime command does not load cncf")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeCommandDoesNotLoadCncf())
         Then("the executable specification holds through scenario-specific expectations")
-        runtimeCommandDoesNotLoadCncf()
+        outcome.get shouldBe ()
       }
 
       "latest runtime is concrete" in {
         Given("the cncf launcher scenario: latest runtime is concrete")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(latestRuntimeIsConcrete())
         Then("the executable specification holds through scenario-specific expectations")
-        latestRuntimeIsConcrete()
+        outcome.get shouldBe ()
       }
 
     }
@@ -531,260 +566,297 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "dev server rewrites to cncf args" in {
         Given("the cncf launcher scenario: dev server rewrites to cncf args")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerRewritesToCncfArgs())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerRewritesToCncfArgs()
+        outcome.get shouldBe ()
       }
 
       "dev server writes state during invocation" in {
         Given("the cncf launcher scenario: dev server writes state during invocation")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerWritesStateDuringInvocation())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerWritesStateDuringInvocation()
+        outcome.get shouldBe ()
       }
 
       "dev server rejects alive existing state" in {
         Given("the cncf launcher scenario: dev server rejects alive existing state")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerRejectsAliveExistingState())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerRejectsAliveExistingState()
+        outcome.get shouldBe ()
       }
 
       "dev server stop existing before invocation" in {
         Given("the cncf launcher scenario: dev server stop existing before invocation")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerStopExistingBeforeInvocation())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerStopExistingBeforeInvocation()
+        outcome.get shouldBe ()
       }
 
       "dev stop stops existing without invocation" in {
         Given("the cncf launcher scenario: dev stop stops existing without invocation")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devStopStopsExistingWithoutInvocation())
         Then("the executable specification holds through scenario-specific expectations")
-        devStopStopsExistingWithoutInvocation()
+        outcome.get shouldBe ()
       }
 
       "dev stop uses recorded port when port is omitted" in {
         Given("the cncf launcher scenario: dev stop uses recorded port when port is omitted")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devStopUsesRecordedPortWhenPortIsOmitted())
         Then("the executable specification holds through scenario-specific expectations")
-        devStopUsesRecordedPortWhenPortIsOmitted()
+        outcome.get shouldBe ()
       }
 
       "dev server force stops after graceful failure" in {
         Given("the cncf launcher scenario: dev server force stops after graceful failure")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerForceStopsAfterGracefulFailure())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerForceStopsAfterGracefulFailure()
+        outcome.get shouldBe ()
       }
 
       "dev server requires force for ambiguous alive state" in {
         Given("the cncf launcher scenario: dev server requires force for ambiguous alive state")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerRequiresForceForAmbiguousAliveState())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerRequiresForceForAmbiguousAliveState()
+        outcome.get shouldBe ()
       }
 
       "dev server rejects pid reuse without force" in {
         Given("the cncf launcher scenario: dev server rejects pid reuse without force")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerRejectsPidReuseWithoutForce())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerRejectsPidReuseWithoutForce()
+        outcome.get shouldBe ()
       }
 
       "dev server profile adds local persistent sqlite args" in {
         Given("the cncf launcher scenario: dev server profile adds local persistent sqlite args")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerProfileAddsLocalPersistentSqliteArgs())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerProfileAddsLocalPersistentSqliteArgs()
+        outcome.get shouldBe ()
       }
 
       "dev server uses runtime development directory" in {
         Given("the cncf launcher scenario: dev server uses runtime development directory")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerUsesRuntimeDevelopmentDirectory())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerUsesRuntimeDevelopmentDirectory()
+        outcome.get shouldBe ()
       }
 
       "dev server uses runtime development catalog for selection" in {
         Given("the cncf launcher scenario: dev server uses runtime development catalog for selection")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerUsesRuntimeDevelopmentCatalogForSelection())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerUsesRuntimeDevelopmentCatalogForSelection()
+        outcome.get shouldBe ()
       }
 
       "dev command passes runtime leading args" in {
         Given("the cncf launcher scenario: dev command passes runtime leading args")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCommandPassesRuntimeLeadingArgs())
         Then("the executable specification holds through scenario-specific expectations")
-        devCommandPassesRuntimeLeadingArgs()
+        outcome.get shouldBe ()
       }
 
       "dev command keeps sample main class value as runtime arg" in {
         Given("the cncf launcher scenario: dev command keeps sample main class value as runtime arg")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCommandKeepsSampleMainClassValueAsRuntimeArg())
         Then("the executable specification holds through scenario-specific expectations")
-        devCommandKeepsSampleMainClassValueAsRuntimeArg()
+        outcome.get shouldBe ()
       }
 
       "dev command can disable project classpath" in {
         Given("the cncf launcher scenario: dev command can disable project classpath")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCommandCanDisableProjectClasspath())
         Then("the executable specification holds through scenario-specific expectations")
-        devCommandCanDisableProjectClasspath()
+        outcome.get shouldBe ()
       }
 
       "dev command can disable project component dev dir" in {
         Given("the cncf launcher scenario: dev command can disable project component dev dir")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCommandCanDisableProjectComponentDevDir())
         Then("the executable specification holds through scenario-specific expectations")
-        devCommandCanDisableProjectComponentDevDir()
+        outcome.get shouldBe ()
       }
 
       "dev command does not auto activate component dir artifacts" in {
         Given("the cncf launcher scenario: dev command does not auto activate component dir artifacts")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCommandDoesNotAutoActivateComponentDirArtifacts())
         Then("the executable specification holds through scenario-specific expectations")
-        devCommandDoesNotAutoActivateComponentDirArtifacts()
+        outcome.get shouldBe ()
       }
 
       "dev target options are mutually exclusive" in {
         Given("the cncf launcher scenario: dev target options are mutually exclusive")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devTargetOptionsAreMutuallyExclusive())
         Then("the executable specification holds through scenario-specific expectations")
-        devTargetOptionsAreMutuallyExclusive()
+        outcome.get shouldBe ()
       }
 
       "dev name target uses local snapshot only" in {
         Given("the cncf launcher scenario: dev name target uses local snapshot only")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devNameTargetUsesLocalSnapshotOnly())
         Then("the executable specification holds through scenario-specific expectations")
-        devNameTargetUsesLocalSnapshotOnly()
+        outcome.get shouldBe ()
       }
 
       "dev name target snapshot bypasses release catalog" in {
         Given("the cncf launcher scenario: dev name target snapshot bypasses release catalog")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devNameTargetSnapshotBypassesReleaseCatalog())
         Then("the executable specification holds through scenario-specific expectations")
-        devNameTargetSnapshotBypassesReleaseCatalog()
+        outcome.get shouldBe ()
       }
 
       "dev name target uses release repositories" in {
         Given("the cncf launcher scenario: dev name target uses release repositories")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devNameTargetUsesReleaseRepositories())
         Then("the executable specification holds through scenario-specific expectations")
-        devNameTargetUsesReleaseRepositories()
+        outcome.get shouldBe ()
       }
 
       "dev server emulation rewrites to cncf args" in {
         Given("the cncf launcher scenario: dev server emulation rewrites to cncf args")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerEmulationRewritesToCncfArgs())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerEmulationRewritesToCncfArgs()
+        outcome.get shouldBe ()
       }
 
       "dev help explains resolution model" in {
         Given("the cncf launcher scenario: dev help explains resolution model")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devHelpExplainsResolutionModel())
         Then("the executable specification holds through scenario-specific expectations")
-        devHelpExplainsResolutionModel()
+        outcome.get shouldBe ()
       }
 
       "dev check reports main target and dependency resolution" in {
         Given("the cncf launcher scenario: dev check reports main target and dependency resolution")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCheckReportsMainTargetAndDependencyResolution())
         Then("the executable specification holds through scenario-specific expectations")
-        devCheckReportsMainTargetAndDependencyResolution()
+        outcome.get shouldBe ()
       }
 
       "dev check reports dev server state" in {
         Given("the cncf launcher scenario: dev check reports dev server state")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCheckReportsDevServerState())
         Then("the executable specification holds through scenario-specific expectations")
-        devCheckReportsDevServerState()
+        outcome.get shouldBe ()
       }
 
-      "dev check treats missing main target classpath as warning" in {
-        Given("the cncf launcher scenario: dev check treats missing main target classpath as warning")
+      "dev check treats missing main target classpath as error" in {
+        Given("the cncf launcher scenario: dev check treats missing main target classpath as error")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCheckTreatsMissingMainTargetClasspathAsError())
         Then("the executable specification holds through scenario-specific expectations")
-        devCheckTreatsMissingMainTargetClasspathAsWarning()
+        outcome.get shouldBe ()
       }
 
       "dev check treats missing dependency classpath as error" in {
         Given("the cncf launcher scenario: dev check treats missing dependency classpath as error")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCheckTreatsMissingDependencyClasspathAsError())
         Then("the executable specification holds through scenario-specific expectations")
-        devCheckTreatsMissingDependencyClasspathAsError()
+        outcome.get shouldBe ()
       }
 
-      "dev server auto generates main target classpath" in {
-        Given("the cncf launcher scenario: dev server auto generates main target classpath")
+      "dev server requires prepared main target classpath" in {
+        Given("the cncf launcher scenario: dev server requires prepared main target classpath")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devServerRequiresPreparedMainTargetClasspath())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerAutoGeneratesMainTargetClasspath()
+        outcome.get shouldBe ()
       }
 
-      "dev server reports main target classpath export failure" in {
-        Given("the cncf launcher scenario: dev server reports main target classpath export failure")
+      "runtime development requires prepared classpath" in {
+        Given("the cncf launcher scenario: runtime development requires prepared classpath")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeDevelopmentRequiresPreparedClasspath())
         Then("the executable specification holds through scenario-specific expectations")
-        devServerReportsMainTargetClasspathExportFailure()
+        outcome.get shouldBe ()
       }
 
       "dev uses current compatible runtime by default" in {
         Given("the cncf launcher scenario: dev uses current compatible runtime by default")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devUsesCurrentCompatibleRuntimeByDefault())
         Then("the executable specification holds through scenario-specific expectations")
-        devUsesCurrentCompatibleRuntimeByDefault()
+        outcome.get shouldBe ()
       }
 
       "dev can select latest tested runtime" in {
         Given("the cncf launcher scenario: dev can select latest tested runtime")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCanSelectLatestTestedRuntime())
         Then("the executable specification holds through scenario-specific expectations")
-        devCanSelectLatestTestedRuntime()
+        outcome.get shouldBe ()
       }
 
       "dev can select latest compatible runtime" in {
         Given("the cncf launcher scenario: dev can select latest compatible runtime")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCanSelectLatestCompatibleRuntime())
         Then("the executable specification holds through scenario-specific expectations")
-        devCanSelectLatestCompatibleRuntime()
+        outcome.get shouldBe ()
       }
 
       "dev can select newest compatible runtime" in {
         Given("the cncf launcher scenario: dev can select newest compatible runtime")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devCanSelectNewestCompatibleRuntime())
         Then("the executable specification holds through scenario-specific expectations")
-        devCanSelectNewestCompatibleRuntime()
+        outcome.get shouldBe ()
       }
 
       "dev parses inline runtime requirement lists" in {
         Given("the cncf launcher scenario: dev parses inline runtime requirement lists")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devParsesInlineRuntimeRequirementLists())
         Then("the executable specification holds through scenario-specific expectations")
-        devParsesInlineRuntimeRequirementLists()
+        outcome.get shouldBe ()
       }
 
       "dev selects common runtime across project and dependency" in {
         Given("the cncf launcher scenario: dev selects common runtime across project and dependency")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devSelectsCommonRuntimeAcrossProjectAndDependency())
         Then("the executable specification holds through scenario-specific expectations")
-        devSelectsCommonRuntimeAcrossProjectAndDependency()
+        outcome.get shouldBe ()
       }
 
       "dev runtime conflict defaults to error" in {
         Given("the cncf launcher scenario: dev runtime conflict defaults to error")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devRuntimeConflictDefaultsToError())
         Then("the executable specification holds through scenario-specific expectations")
-        devRuntimeConflictDefaultsToError()
+        outcome.get shouldBe ()
       }
 
       "dev runtime conflict can use newest policy" in {
         Given("the cncf launcher scenario: dev runtime conflict can use newest policy")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(devRuntimeConflictCanUseNewestPolicy())
         Then("the executable specification holds through scenario-specific expectations")
-        devRuntimeConflictCanUseNewestPolicy()
+        outcome.get shouldBe ()
       }
 
     }
@@ -793,8 +865,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "no runtime library dependencies" in {
         Given("the cncf launcher scenario: no runtime library dependencies")
         When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(noCncfRuntimeLibraryDependencies())
         Then("the executable specification holds through scenario-specific expectations")
-        noCncfRuntimeLibraryDependencies()
+        outcome.get shouldBe ()
       }
 
     }
@@ -1592,6 +1665,28 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     invoker.lastArgs should not contain s"--textus.control-center.registration-instance-id=$correlatedinstanceid"
   }
 
+  def controlCenterConfigAppliesOnlyToCurrentProject(): Unit = _with_temp_paths { paths =>
+    Given("a Control Center development checkout and its private standalone server configuration")
+    _write(paths.cwd.resolve("project.yaml"),
+      """project:
+        |  name: textus-control-center
+        |  component:
+        |    name: textus-control-center
+        |""".stripMargin)
+    val configfile = paths.cncfHome.resolve("textus-control-center").resolve("server-config.yaml")
+    _write(configfile, "textus: {}\n")
+    val currentinvoker = FakeInvoker()
+    val targetinvoker = FakeInvoker()
+
+    When("the current project and an explicit repository target are started from the same directory")
+    new CncfLauncher(paths, FakeResolver(), currentinvoker).run(Vector("server"))
+    new CncfLauncher(paths, FakeResolver(), targetinvoker).run(Vector("other-component:0.1.0", "server"))
+
+    Then("only the current Control Center server receives the private standalone configuration")
+    currentinvoker.lastArgs.exists(_.contains(configfile.toString)) shouldBe true
+    targetinvoker.lastArgs.exists(_.contains(configfile.toString)) shouldBe false
+  }
+
   def standaloneControlCenterLocatorLifecycle(): Unit = _with_temp_paths { paths =>
     Given("a machine-local standalone Control Center locator and owner-only launcher token")
     val root = paths.cncfHome.resolve("textus-control-center")
@@ -1766,14 +1861,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         startedAt = java.time.Instant.parse("2026-07-18T00:00:00Z")
       )
 
-      When("the reporter receives authorization rejection for registration and deregistration")
+      When("the reporter receives authorization rejection for registration")
       val session = CncfTextusControlCenterRegistrationReporter.System.start(config, report, Some("rejected-token"))
       session.close()
 
-      Then("it performs exactly one bounded request for each lifecycle transition without a retry loop")
-      _assert_equals(requests.size, 2)
+      Then("it records one bounded registration attempt and never deregisters an unregistered subsystem")
+      _assert_equals(requests.size, 1)
       requests.exists(_.contains("register-subsystem")) shouldBe true
-      requests.exists(_.contains("deregister-subsystem")) shouldBe true
+      requests.exists(_.contains("deregister-subsystem")) shouldBe false
     } finally {
       server.stop(0)
     }
@@ -2516,7 +2611,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val (code, output) = _capture_stdout {
       launcher.run(Vector("dev", "check"))
     }
-    _assert_equals(code, 0)
+    _assert_equals(code, 2)
     output.contains("dev-target mode=project-dev") shouldBe true
     output.contains("main-target source=local-project") shouldBe true
     output.contains("main-target-repository-lookup disabled in project-dev mode") shouldBe true
@@ -2529,6 +2624,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   }
 
   def devCheckReportsDevServerState(): Unit = _with_temp_paths { paths =>
+    val classdir = paths.cwd.resolve("target").resolve("classes")
+    Files.createDirectories(classdir)
+    _write(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt"), classdir.toString)
     _write_dev_server_state(paths.cwd, 2230L, "19610")
     val processmanager = FakeDevServerProcessManager(3337L)
     processmanager.alive = Set(2230L)
@@ -2544,15 +2642,15 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     output.contains("port=19610") shouldBe true
   }
 
-  def devCheckTreatsMissingMainTargetClasspathAsWarning(): Unit = _with_temp_paths { paths =>
+  def devCheckTreatsMissingMainTargetClasspathAsError(): Unit = _with_temp_paths { paths =>
     val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
     val (code, output) = _capture_stdout {
       launcher.run(Vector("dev", "check"))
     }
-    _assert_equals(code, 0)
-    output.contains("WARN") shouldBe true
+    _assert_equals(code, 2)
+    output.contains("ERROR") shouldBe true
     output.contains("runtime-classpath") shouldBe true
-    output.contains("dev server will run cncf dev classpath automatically") shouldBe true
+    output.contains("prepare the development runtime classpath") shouldBe true
   }
 
   def devCheckTreatsMissingDependencyClasspathAsError(): Unit = _with_temp_paths { paths =>
@@ -2567,37 +2665,30 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     output.contains("run cncf dev classpath --project-dev") shouldBe true
   }
 
-  def devServerAutoGeneratesMainTargetClasspath(): Unit = _with_temp_paths { paths =>
+  def devServerRequiresPreparedMainTargetClasspath(): Unit = _with_temp_paths { paths =>
     val classdir = paths.cwd.resolve("target").resolve("classes")
-    Files.createDirectories(classdir)
     val exporter = FakeClasspathExporter.success(classdir.toString)
-    val invoker = FakeInvoker()
-    val launcher = new CncfLauncher(paths, FakeResolver(), invoker, exporter)
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), exporter)
 
-    val code = launcher.run(Vector("dev", "server"))
+    val failure = intercept[CncfException] {
+      launcher.run(Vector("dev", "server"))
+    }
 
-    _assert_equals(code, 0)
-    _assert_equals(exporter.projects, Vector(paths.cwd))
-    Files.isRegularFile(paths.cwd.resolve("target").resolve("cncf.d").resolve("runtime-classpath.txt")) shouldBe true
-    invoker.lastClasspath.contains(classdir) shouldBe true
-    invoker.lastArgs.contains("--component-dev-dir") shouldBe true
-    invoker.lastArgs.contains(paths.cwd.toString) shouldBe true
+    failure.getMessage.contains("development runtime classpath not found") shouldBe true
+    exporter.projects shouldBe empty
   }
 
-  def devServerReportsMainTargetClasspathExportFailure(): Unit = _with_temp_paths { paths =>
-    val exporter = FakeClasspathExporter.failure("sbt failed")
-    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), exporter)
-    val failed =
-      try {
-        launcher.run(Vector("dev", "server"))
-        false
-      } catch {
-        case e: CncfException =>
-          e.getMessage.contains("failed to prepare main target runtime classpath") &&
-            e.getMessage.contains("run cncf dev classpath --project-dev") &&
-            e.getMessage.contains("sbt failed")
-      }
-    failed shouldBe true
+  def runtimeDevelopmentRequiresPreparedClasspath(): Unit = _with_temp_paths { paths =>
+    val runtimeproject = paths.cwd.resolve("runtime")
+    val exporter = FakeClasspathExporter.failure("SBT must not run")
+    val support = new DevSupport(paths, exporter)
+
+    val failure = intercept[CncfException] {
+      support.cncfRuntimeClasspath(runtimeproject)
+    }
+
+    failure.getMessage.contains("development runtime classpath not found") shouldBe true
+    exporter.projects shouldBe empty
   }
 
   def devUsesCurrentCompatibleRuntimeByDefault(): Unit = _with_temp_paths { paths =>
@@ -3027,15 +3118,21 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   def canonicalServerRetainsDevelopmentProfile(): Unit = _with_temp_paths { paths =>
     Given("a CAR project started through the canonical current-directory command")
     _write(paths.cwd.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
-    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+    _write(paths.cwd.resolve("build.sbt"), """version := "1.0.0-SNAPSHOT"
+      |""".stripMargin)
+    val runtimejar = paths.cwd.resolve("runtime-cache").resolve("0.5.0-SNAPSHOT").resolve("jars").resolve("goldenport-cncf_3.jar")
+    _write(DevSupport.runtimeClasspathFile(paths.cwd), runtimejar.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
 
-    When("cncf server completes while no supervisor profile mapping or foreground authority command exists")
+    When("cncf server adds its development assembly arguments and completes without a foreground authority command")
     launcher.run(Vector("server")) shouldBe 0
     val profile = LifecycleSupervisorProfileResolver(paths).resolve("textus-control-center")
     val evidence = CncfLocalServerEvidenceStore(paths).listProjection().toOption.get.entries
 
-    Then("the public current-directory command retains evidence and supplies the validated lifecycle profile")
+    Then("the original server intent retains evidence while only the runtime receives the additional arguments")
     Files.exists(paths.supervisorConfig) shouldBe false
+    invoker.lastArgs.indexOf("server") should be > 0
     evidence.map(_.launcherKind) should contain ("cncf")
     evidence.map(_.stoppedAt.isDefined) should contain (true)
     profile.map(_.developmentDirectory) shouldBe Right(paths.cwd.toAbsolutePath.normalize)
