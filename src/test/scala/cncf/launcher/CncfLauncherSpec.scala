@@ -43,6 +43,7 @@ object CncfLauncherSpec {
     spec.configFileOptionRequiresExistingFile()
     spec.runtimeVersionPrecedence()
     spec.runtimeUseWritesExpectedFiles()
+    spec.runtimeUseSelectsExactLocalSnapshot()
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
     spec.installCliWritesDevelopmentCommand()
     spec.installCliPinsExplicitRuntimeVersion()
@@ -442,6 +443,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the launcher behavior is exercised")
         val outcome = scala.util.Try(runtimeUseWritesExpectedFiles())
         Then("the executable specification holds through scenario-specific expectations")
+        outcome.get shouldBe ()
+      }
+
+      "runtime use selects an exact local snapshot without a catalog entry" in {
+        Given("an exact locally available SNAPSHOT runtime version")
+        When("the developer selects it as the global runtime")
+        val outcome = scala.util.Try(runtimeUseSelectsExactLocalSnapshot())
+        Then("the exact SNAPSHOT version is retained for subsequent development commands")
         outcome.get shouldBe ()
       }
 
@@ -1487,6 +1496,16 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     invoker.lastArgs.contains("--launcher-home") shouldBe true
     invoker.lastArgs.contains(passthroughhome) shouldBe true
     Files.exists(paths.cwd.resolve(passthroughhome).resolve(".cncf")) shouldBe false
+  }
+
+  def runtimeUseSelectsExactLocalSnapshot(): Unit = _with_temp_paths { paths =>
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    launcher.run(Vector("runtime", "use", "0.5.1-SNAPSHOT", "--global"))
+
+    _assert_equals(Files.readString(paths.globalVersion).trim, "0.5.1-SNAPSHOT")
+    _assert_equals(resolver.resolvedVersions, Vector("0.5.1-SNAPSHOT"))
   }
 
   def runtimeUseAutoSelectsProjectWhenCncfDirectoryExists(): Unit = _with_temp_paths { paths =>

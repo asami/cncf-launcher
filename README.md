@@ -15,6 +15,7 @@ cncf runtime refresh
 cncf runtime use recommended
 cncf runtime use latest
 cncf runtime use newest
+cncf runtime use 0.5.1-SNAPSHOT --global
 
 cncf repository list
 cncf repository list --kind car --include-development
@@ -338,6 +339,20 @@ Runtime version selection is the same model as `textus`:
 `cncf runtime use <version>` writes project scope when the current directory
 already has `.cncf/`; otherwise it writes global scope. Use `--project` or
 `--global` to force the target.
+
+An exact local SNAPSHOT version is a supported development-runtime selection:
+
+```bash
+cncf runtime use 0.5.1-SNAPSHOT --global
+```
+
+This writes the exact version to `~/.cncf/version`; `--project` writes it to
+`$PWD/.cncf/version` instead. Exact SNAPSHOT versions do not need to appear in
+the runtime catalog. They must already be resolvable from the local development
+repository or installed runtime classpath under `~/.cncf/runtimes`. Development
+commands installed without an explicit runtime option follow this selection at
+execution time, so changing the selected SNAPSHOT does not require reinstalling
+the command.
 
 Runtime selector terms are:
 
