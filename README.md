@@ -67,12 +67,16 @@ the operation selector and operation parameters. The target is resolved to an ab
 project path at install time. `~/bin` is the default install
 directory; use `--bin-dir <dir>` to choose another location.
 
-When `--runtime-dev-dir` is supplied, `install-cli` pins that absolute runtime
-directory in the wrapper. The launcher reads the runtime version from its
+Without an explicit runtime option, `install-cli` leaves runtime selection out
+of the wrapper. Each invocation therefore follows `launcher.yaml`, `.cncf/version`,
+and `~/.cncf/version`, including switching a configured development runtime on
+or off after the command has been installed.
+
+When `--runtime <version>` is supplied, `install-cli` pins that version in the
+wrapper. When `--runtime-dev-dir` is supplied, it pins that absolute runtime
+directory. The launcher reads a development runtime version from its
 `build.sbt` and checks it against the main and development dependency component
 requirements. This path does not select a version from the runtime catalog.
-Without `--runtime-dev-dir`, `install-cli` resolves and pins the selected
-runtime version.
 
 Leaf-only operation selectors such as `validate-presentation` depend on CNCF
 runtime selector resolution. If the pinned runtime requires a full selector,

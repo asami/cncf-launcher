@@ -10,7 +10,7 @@ import io.circe.syntax.*
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jul. 24, 2026
+ * @version Jul. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -671,17 +671,22 @@ final class CncfLauncher(
     configfiles: Vector[String],
     cncfconfigfiles: Vector[String]
   ): Int = {
-    val pinned = _pin_install_cli_runtime(command, configfiles, cncfconfigfiles)
-    val path = CliInstaller.installCncf(paths, pinned)
-    println(s"installed CLI command ${pinned.installedName}: ${path}")
+    val prepared = _prepare_install_cli(command, configfiles, cncfconfigfiles)
+    val path = CliInstaller.installCncf(paths, prepared)
+    println(s"installed CLI command ${prepared.installedName}: ${path}")
     0
   }
 
-  private def _pin_install_cli_runtime(
+  private def _prepare_install_cli(
     command: CncfCommand.InstallCli,
     configfiles: Vector[String],
     cncfconfigfiles: Vector[String]
   ): CncfCommand.InstallCli = {
+    val shouldpinruntime =
+      command.runtimeVersion.nonEmpty ||
+        command.runtimeSelectionPolicy.nonEmpty ||
+        command.runtimeNoCompatiblePolicy.nonEmpty ||
+        command.runtimeDevDir.nonEmpty
     val options = CncfCommand.DevOptions(
       target = CncfCommand.DevTarget.ProjectDev(command.projectDev),
       runtimeVersion = command.runtimeVersion,
@@ -700,9 +705,9 @@ final class CncfLauncher(
       else
         LauncherConfig.load(effectivepaths, configfiles, environment).mergeHigher(explicitconfig)
     val store = RuntimeVersionStore(effectivepaths)
-    val hasdevelopmentruntime = options.runtimeDevDir.orElse(config.runtimeDevDir).isDefined
+    val hasdevelopmentruntime = shouldpinruntime && options.runtimeDevDir.orElse(config.runtimeDevDir).isDefined
     val basecatalog =
-      if (hasdevelopmentruntime) None
+      if (!shouldpinruntime || hasdevelopmentruntime) None
       else RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
     val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
     val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
@@ -715,25 +720,32 @@ final class CncfLauncher(
       case None => basecatalog
     }
     val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
-    val runtimedevdir = rawcontext.runtimeDevDir.map(_.toString)
-    val runtimeversion = rawcontext.runtimeDevDir match {
-      case Some(dir) =>
-        _validate_development_runtime(dir, rawcontext.runtimeRequirements)
+    val runtimedevdir =
+      if (shouldpinruntime) rawcontext.runtimeDevDir.map(_.toString)
+      else None
+    val runtimeversion =
+      if (!shouldpinruntime) {
         None
-      case None =>
-        val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
-          orElse(effectiveconfig.runtimeSelectionPolicy).
-          getOrElse(RuntimeSelectionPolicy.CurrentCompatible)
-        val policy = effectiveoptions.runtimeNoCompatiblePolicy.orElse(effectiveconfig.runtimeNoCompatiblePolicy).getOrElse(RuntimeNoCompatiblePolicy.Error)
-        Some(RuntimeVersionSelection.select(
-          requested = effectiveoptions.runtimeVersion,
-          stored = store.current(None, effectiveconfig),
-          requirements = rawcontext.runtimeRequirements,
-          catalog = catalog,
-          selectionPolicy = selectionpolicy,
-          policy = policy
-        ))
-    }
+      } else {
+        rawcontext.runtimeDevDir match {
+          case Some(dir) =>
+            _validate_development_runtime(dir, rawcontext.runtimeRequirements)
+            None
+          case None =>
+            val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
+              orElse(effectiveconfig.runtimeSelectionPolicy).
+              getOrElse(RuntimeSelectionPolicy.CurrentCompatible)
+            val policy = effectiveoptions.runtimeNoCompatiblePolicy.orElse(effectiveconfig.runtimeNoCompatiblePolicy).getOrElse(RuntimeNoCompatiblePolicy.Error)
+            Some(RuntimeVersionSelection.select(
+              requested = effectiveoptions.runtimeVersion,
+              stored = store.current(None, effectiveconfig),
+              requirements = rawcontext.runtimeRequirements,
+              catalog = catalog,
+              selectionPolicy = selectionpolicy,
+              policy = policy
+            ))
+        }
+      }
     command.copy(
       runtimeVersion = runtimeversion,
       runtimeSelectionPolicy = None,

@@ -19,7 +19,7 @@ import LifecycleSupervisorStateStore.given
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 24, 2026
+ * @version Jul. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -45,6 +45,7 @@ object CncfLauncherSpec {
     spec.runtimeUseWritesExpectedFiles()
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
     spec.installCliWritesDevelopmentCommand()
+    spec.installCliPinsExplicitRuntimeVersion()
     spec.installCliPinsDevelopmentRuntimeWithoutCatalog()
     spec.installCliRejectsIncompatibleDevelopmentRuntime()
     spec.textusControlCenterRegistrationLifecycle()
@@ -453,10 +454,18 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       }
 
       "install cli writes development command" in {
-        Given("the cncf launcher scenario: install cli writes development command")
+        Given("launcher configuration selects the runtime for a development command")
         When("the launcher installs a development command")
         val outcome = scala.util.Try(installCliWritesDevelopmentCommand())
-        Then("the command delegates to cncf target-first command with file parameter expansion")
+        Then("the command delegates runtime selection to launcher configuration")
+        outcome.get shouldBe ()
+      }
+
+      "install cli pins an explicitly requested runtime version" in {
+        Given("an explicit runtime version for a development command")
+        When("the launcher installs the development command")
+        val outcome = scala.util.Try(installCliPinsExplicitRuntimeVersion())
+        Then("the wrapper retains the explicit runtime version")
         outcome.get shouldBe ()
       }
 
@@ -1513,15 +1522,45 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val script = Files.readString(command)
     script.contains(s"fixed_target='${paths.cwd.toAbsolutePath.normalize}'") shouldBe true
     script.contains("operation_prefix=''") shouldBe true
-    script.contains("runtime_version='0.4.12'") shouldBe true
+    script.contains("runtime_version=''") shouldBe true
     script.contains("runtime_dev_dir=''") shouldBe true
+    script.contains("declare -a cncf_args=(\"cncf\")") shouldBe true
     script.contains(s"launcher_dev_dir='${paths.cwd.resolve("launcher-dev").toAbsolutePath.normalize}'") shouldBe true
     script.contains("export CNCF_LAUNCHER_DEV_DIR=\"$launcher_dev_dir\"") shouldBe true
     script.contains("component_dev_dirs=(") shouldBe true
     script.contains(s"'${paths.cwd.resolve("../textus-georesolver").toAbsolutePath.normalize}'") shouldBe true
     script.contains("component_dev_args+=(\"--component-dev-dir\" \"$dir\")") shouldBe true
-    script.contains("exec cncf \"${cncf_args[@]}\" \"$fixed_target\" command \"${component_dev_args[@]}\" \"${command_args[@]}\"") shouldBe true
+    script.contains("exec \"${cncf_args[@]}\" \"$fixed_target\" command \"${component_dev_args[@]}\" \"${command_args[@]}\"") shouldBe true
     Files.isExecutable(command) shouldBe true
+  }
+
+  def installCliPinsExplicitRuntimeVersion(): Unit = _with_temp_paths { paths =>
+    val catalogfile = paths.cwd.resolve("runtime-catalog.yaml")
+    _write(catalogfile, _catalog_text)
+    _write(
+      paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      s"runtime:\n  catalog:\n    url: $catalogfile\n"
+    )
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      FakeInvoker(),
+      environment = Map("CNCF_LAUNCHER_DEV_DELEGATED" -> "1")
+    )
+
+    val code = launcher.run(Vector(
+      "--runtime",
+      "0.2.0",
+      "install-cli",
+      "sanpomap",
+      "--project-dev",
+      "."
+    ))
+
+    _assert_equals(code, 0)
+    val script = Files.readString(paths.home.resolve("bin").resolve("sanpomap-dev"))
+    script.contains("runtime_version='0.2.0'") shouldBe true
+    script.contains("runtime_dev_dir=''") shouldBe true
   }
 
   def installCliPinsDevelopmentRuntimeWithoutCatalog(): Unit = _with_temp_paths { paths =>

@@ -5,7 +5,7 @@ import java.nio.file.{Files, Path}
 
 /*
  * @since   Jun. 29, 2026
- * @version Jun. 29, 2026
+ * @version Jul. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 object CliInstaller {
@@ -100,7 +100,7 @@ object CliInstaller {
        |esac
        |
        |${selectorblock}
-       |declare -a cncf_args=()
+       |declare -a cncf_args=("cncf")
        |if [[ -n "$$runtime_version" ]]; then
        |  cncf_args+=("--runtime" "$$runtime_version")
        |fi
@@ -154,7 +154,7 @@ object CliInstaller {
        |  esac
        |done
        |
-       |exec cncf "$${cncf_args[@]}" "$$fixed_target" command "$${component_dev_args[@]}" "$${command_args[@]}"
+       |exec "$${cncf_args[@]}" "$$fixed_target" command "$${component_dev_args[@]}" "$${command_args[@]}"
        |""".stripMargin
   }
 

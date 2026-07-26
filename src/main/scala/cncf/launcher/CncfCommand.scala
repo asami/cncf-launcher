@@ -3,7 +3,7 @@ package cncf.launcher
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 22, 2026
+ * @version Jul. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -766,7 +766,8 @@ object CncfCommandParser {
       |  --runtime-selection=current-compatible|tested-latest|latest-compatible|newest-compatible selects the compatible runtime preference.
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF runtime checkout for execute and installed development commands.
-      |  install-cli pins an explicit runtime development directory and validates its version against component runtime requirements without catalog selection.
+      |  install-cli defers runtime selection to launcher configuration unless an explicit runtime option is supplied.
+      |  An explicit --runtime or --runtime-dev-dir is pinned into the installed development command and validated against component requirements.
       |  cncf dev is deprecated; use target-first command, server, or client syntax, or install-cli for a fixed development command.
       |  Config runtime.dev-dir is the configuration equivalent of --runtime-dev-dir.
       |  CNCF_VERSION/CNCF_RUNTIME_VERSION override the configured runtime version.
