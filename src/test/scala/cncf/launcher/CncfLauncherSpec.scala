@@ -19,7 +19,7 @@ import LifecycleSupervisorStateStore.given
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 27, 2026
+ * @version Jul. 28, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -58,6 +58,11 @@ object CncfLauncherSpec {
     spec.textusControlCenterRegistrationHttpFailureIsolation()
     spec.lifecycleSupervisorFailurePreservesRegistrationHeartbeat()
     spec.executeTargetFirstDelegatesToRuntime()
+    spec.canonicalDevelopmentTargetsUseConfiguredRuntime()
+    spec.canonicalDevelopmentTargetUsesExplicitRuntimeVersion()
+    spec.canonicalDevelopmentTargetUsesExplicitDevelopmentRuntime()
+    spec.canonicalServerRejectsRuntimeCheckoutTarget()
+    spec.deprecatedDevSeparatesDevelopmentTargetFromRuntime()
     spec.serverExecutionDelegatesDefaultPortResolutionToRuntime()
     spec.runtimeCatalogParseAndSelectorResolution()
     spec.runtimeCatalogCommands()
@@ -526,6 +531,28 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         outcome.get shouldBe ()
       }
 
+      "canonical target and runtime boundary" which {
+        "CAR development targets use the configured CNCF development runtime" in {
+          canonicalDevelopmentTargetsUseConfiguredRuntime()
+        }
+
+        "an explicit runtime version overrides a configured development runtime" in {
+          canonicalDevelopmentTargetUsesExplicitRuntimeVersion()
+        }
+
+        "an explicit development runtime retains the CAR execution target" in {
+          canonicalDevelopmentTargetUsesExplicitDevelopmentRuntime()
+        }
+
+        "a CNCF runtime checkout is rejected as a positional component target" in {
+          canonicalServerRejectsRuntimeCheckoutTarget()
+        }
+
+        "deprecated dev execution keeps its target and runtime classpaths separate" in {
+          deprecatedDevSeparatesDevelopmentTargetFromRuntime()
+        }
+      }
+
       "server execution delegates default port resolution to the runtime" in {
         serverExecutionDelegatesDefaultPortResolutionToRuntime()
       }
@@ -933,6 +960,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "validate-presentation"
     )).asInstanceOf[CncfCommand.Execute]
     _assert_equals(currenttarget.args, Vector("command", "--component-dev-dir=.", "validate-presentation"))
+    _assert_equals(currenttarget.developmentTarget, Some(CncfCommand.ExecuteDevelopmentTarget(".", explicit = false)))
 
     val explicitcurrenttarget = CncfCommandParser.parse(Vector(
       ".",
@@ -940,6 +968,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "validate-presentation"
     )).asInstanceOf[CncfCommand.Execute]
     _assert_equals(explicitcurrenttarget.args, Vector("command", "--component-dev-dir=.", "validate-presentation"))
+    _assert_equals(explicitcurrenttarget.developmentTarget, Some(CncfCommand.ExecuteDevelopmentTarget(".", explicit = true)))
 
     val packagedtarget = CncfCommandParser.parse(Vector(
       "command",
@@ -1002,7 +1031,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     output.contains("[--runtime <version>] [--runtime-dev-dir <dir>] install-cli") shouldBe true
     output.contains("[--runtime <version>] [--runtime-dev-dir <dir>] <target> command") shouldBe true
     output.contains("cncf dev is deprecated") shouldBe true
-    output.contains("runtime.dev-dir is the configuration equivalent of --runtime-dev-dir") shouldBe true
+    output.contains("runtime.dev-dir selects a managed development runtime when no explicit --runtime or --runtime-dev-dir is supplied") shouldBe true
     output.contains("ancestor conf/cncf/launcher.yaml and .cncf/launcher.yaml") shouldBe true
     _assert_equals(CncfCommandParser.parse(Vector("help")), CncfCommand.RuntimeHelp)
     _assert_equals(CncfCommandParser.parse(Vector("--help")), CncfCommand.RuntimeHelp)
@@ -1998,6 +2027,117 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(code, 0)
     _assert_equals(resolver.resolvedClasspaths, Vector("0.4.12"))
     _assert_equals(invoker.lastArgs, Vector("command", "--textus.component=textus-sanpomap", "--textus.component.version=1", "validate-presentation", "--format", "yaml"))
+  }
+
+  def canonicalDevelopmentTargetsUseConfiguredRuntime(): Unit = _with_temp_paths { paths =>
+    Given("current and external CAR checkouts plus a configured CNCF development runtime")
+    val externalcar = paths.cwd.resolve("external-car")
+    val configuredruntime = paths.cwd.resolve("configured-runtime")
+    val configuredruntimeclasspath = configuredruntime.resolve("target").resolve("classes")
+    _write(paths.cwd.resolve("project.yaml"), _component_project_yaml("current-car", "car", "1.0.0-SNAPSHOT"))
+    _write(paths.cwd.resolve("build.sbt"), "version := \"1.0.0-SNAPSHOT\"\n")
+    _write(externalcar.resolve("project.yaml"), _component_project_yaml("external-car", "car", "1.0.0-SNAPSHOT", 18123))
+    _write(externalcar.resolve("build.sbt"), "version := \"1.0.0-SNAPSHOT\"\n")
+    _write(externalcar.resolve("conf/cncf/assembly-standalone.yaml"), "textus: {}\n")
+    _write(configuredruntime.resolve("build.sbt"), "ThisBuild / version := \"0.5.1-SNAPSHOT\"\n")
+    _write(DevSupport.runtimeClasspathFile(configuredruntime), configuredruntimeclasspath.toString)
+    _write(paths.cwd.resolve(".cncf/launcher.yaml"), s"runtime:\n  dev-dir: ${configuredruntime.toString}\n")
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    When("the explicit current target, current-CAR shorthand, and external CAR target start")
+    launcher.run(Vector(".", "server")) shouldBe 0
+    launcher.run(Vector("server")) shouldBe 0
+    launcher.run(Vector(externalcar.toString, "server")) shouldBe 0
+
+    Then("all three retain CAR activation and use the configured runtime rather than either CAR build")
+    _assert_equals(resolver.resolvedClasspaths, Vector.empty)
+    invoker.lastClasspath should contain (configuredruntimeclasspath)
+    invoker.lastArgs should contain (s"--component-dev-dir=${externalcar.toString}")
+    invoker.lastArgs should contain (s"--textus.assembly.descriptor=${externalcar.resolve("conf/cncf/assembly-standalone.yaml")}")
+    invoker.lastArgs should contain ("--cncf.server.port=18123")
+    val evidence = CncfLocalServerEvidenceStore(paths).latestDevelopmentProfile("external-car").toOption.flatten
+    evidence.flatMap(_.developmentDirectory) shouldBe Some(externalcar.toAbsolutePath.normalize.toString)
+  }
+
+  def canonicalDevelopmentTargetUsesExplicitRuntimeVersion(): Unit = _with_temp_paths { paths =>
+    Given("an external CAR target, a configured development runtime, and an explicit runtime version")
+    val externalcar = paths.cwd.resolve("external-car")
+    val configuredruntime = paths.cwd.resolve("configured-runtime")
+    _write(externalcar.resolve("project.yaml"), _component_project_yaml("external-car", "car", "1.0.0-SNAPSHOT"))
+    _write(configuredruntime.resolve("build.sbt"), "ThisBuild / version := \"9.9.9-SNAPSHOT\"\n")
+    _write(DevSupport.runtimeClasspathFile(configuredruntime), configuredruntime.resolve("target/classes").toString)
+    _write(paths.cwd.resolve(".cncf/launcher.yaml"),
+      s"""runtime:
+         |  version: 0.4.12
+         |  dev-dir: ${configuredruntime.toString}
+         |""".stripMargin)
+    val resolver = FakeResolver()
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, resolver, invoker)
+
+    When("the external CAR is started with the explicit runtime version")
+    launcher.run(Vector("--runtime", "0.4.13", externalcar.toString, "server")) shouldBe 0
+
+    Then("the explicit version wins without changing the CAR target")
+    resolver.resolvedClasspaths.last shouldBe "0.4.13"
+    invoker.lastArgs should contain (s"--component-dev-dir=${externalcar.toString}")
+    invoker.lastClasspath should not contain configuredruntime.resolve("target/classes")
+  }
+
+  def canonicalDevelopmentTargetUsesExplicitDevelopmentRuntime(): Unit = _with_temp_paths { paths =>
+    Given("an external CAR target and an explicit CNCF development runtime")
+    val externalcar = paths.cwd.resolve("external-car")
+    val explicitruntime = paths.cwd.resolve("explicit-runtime")
+    val explicitruntimeclasspath = explicitruntime.resolve("target").resolve("classes")
+    _write(externalcar.resolve("project.yaml"), _component_project_yaml("external-car", "car", "1.0.0-SNAPSHOT"))
+    _write(explicitruntime.resolve("build.sbt"), "ThisBuild / version := \"0.5.1-SNAPSHOT\"\n")
+    _write(DevSupport.runtimeClasspathFile(explicitruntime), explicitruntimeclasspath.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    When("the CAR is started with the explicit development runtime")
+    launcher.run(Vector("--runtime-dev-dir", explicitruntime.toString, externalcar.toString, "server")) shouldBe 0
+
+    Then("only the runtime classpath changes and the CAR remains the execution target")
+    invoker.lastClasspath should contain (explicitruntimeclasspath)
+    invoker.lastArgs should contain (s"--component-dev-dir=${externalcar.toString}")
+  }
+
+  def canonicalServerRejectsRuntimeCheckoutTarget(): Unit = _with_temp_paths { paths =>
+    Given("a CNCF runtime checkout without CAR or SAR packaging metadata")
+    val runtimetarget = paths.cwd.resolve("cncf-runtime-checkout")
+    _write(runtimetarget.resolve("build.sbt"), "ThisBuild / version := \"0.5.2-SNAPSHOT\"\n")
+    _write(runtimetarget.resolve("project.yaml"), "project:\n  name: cloud-native-component-framework\n")
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
+
+    When("a CNCF runtime checkout is passed as the positional component target")
+    val failure = intercept[CncfException] {
+      launcher.run(Vector(runtimetarget.toString, "server"))
+    }
+
+    Then("it is rejected instead of being reinterpreted as a runtime development override")
+    failure.getMessage should include("is not a CAR/SAR development target")
+  }
+
+  def deprecatedDevSeparatesDevelopmentTargetFromRuntime(): Unit = _with_temp_paths { paths =>
+    Given("a deprecated dev target classpath and a separate CNCF development runtime classpath")
+    val explicitruntime = paths.cwd.resolve("explicit-runtime")
+    val explicitruntimeclasspath = explicitruntime.resolve("target").resolve("classes")
+    val appclasspath = paths.cwd.resolve("target").resolve("classes")
+    _write(explicitruntime.resolve("build.sbt"), "ThisBuild / version := \"0.5.1-SNAPSHOT\"\n")
+    _write(DevSupport.runtimeClasspathFile(explicitruntime), explicitruntimeclasspath.toString)
+    _write(DevSupport.runtimeClasspathFile(paths.cwd), appclasspath.toString)
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    When("the deprecated dev server is started with the explicit runtime checkout")
+    launcher.run(Vector("dev", "server", "--runtime-dev-dir", explicitruntime.toString)) shouldBe 0
+
+    Then("the invocation contains both independent classpaths")
+    invoker.lastClasspath should contain (explicitruntimeclasspath)
+    invoker.lastClasspath should contain (appclasspath)
   }
 
   def serverExecutionDelegatesDefaultPortResolutionToRuntime(): Unit = _with_temp_paths { paths =>

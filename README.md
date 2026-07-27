@@ -39,11 +39,14 @@ artifact while preserving the shared six-column repository output contract.
 `client` syntax. `cncf dev` remains only as a compatibility alias and is not
 the supported component-development entry point.
 
-For target-first `server` execution, the launcher forwards artifact activation
-without assigning a port. CNCF runtime reads `textus.server.default-port` from
-the CAR/SAR descriptor, coordinates the machine-local assignment, and selects
-an additional-instance port when necessary. `textus.server.port` remains an
-explicit operator override and may be supplied as a runtime property.
+For a packaged target-first `server` execution, the launcher forwards artifact
+activation without assigning a port. CNCF runtime reads
+`textus.server.default-port` from the CAR/SAR descriptor, coordinates the
+machine-local assignment, and selects an additional-instance port when
+necessary. For a CAR/SAR development-directory target, the launcher may derive
+the standalone assembly descriptor and declared default port from that target.
+`textus.server.port` remains an explicit operator override and may be supplied
+as a runtime property.
 
 ## Development CLI Installation
 
@@ -123,8 +126,11 @@ launcher for repository-based application startup.
 
 Use `--runtime-dev-dir <dir>` or `runtime.dev-dir` to run against a local CNCF
 runtime checkout instead of a published runtime artifact. This applies to
-target-first commands and development CLI installation. It is for CNCF core
-development; component source directories still use `--component-dev-dir`.
+target-first commands and development CLI installation. For canonical
+target-first execution, explicit `--runtime-dev-dir` has highest precedence,
+and explicit `--runtime` overrides configured `runtime.dev-dir`. It is for CNCF
+core development; component source directories still use
+`--component-dev-dir`.
 
 Runtime arguments placed before the operation selector are forwarded before
 `server`, `client`, or `command`, for example `cncf . command --repository-dir
@@ -328,13 +334,15 @@ to CNCF runtime configuration.
 `.textus/config.yaml` remains a CNCF runtime/project configuration file. It is
 not read as launcher configuration.
 
-Runtime version selection is the same model as `textus`:
+Canonical target-first runtime selection uses:
 
-1. `--runtime-dev-dir <dir>` / `runtime.dev-dir`
-2. `--runtime <version>`
-3. `$PWD/.cncf/version`
-4. `~/.cncf/version`
-5. `recommended`
+1. explicit `--runtime-dev-dir <dir>`
+2. explicit `--runtime <version>`
+3. configured `runtime.dev-dir`
+4. `$PWD/.cncf/version`
+5. `~/.cncf/version`
+6. configured `runtime.version`
+7. `recommended`
 
 `cncf runtime use <version>` writes project scope when the current directory
 already has `.cncf/`; otherwise it writes global scope. Use `--project` or

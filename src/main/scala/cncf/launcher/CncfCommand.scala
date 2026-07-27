@@ -3,7 +3,7 @@ package cncf.launcher
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 27, 2026
+ * @version Jul. 28, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -30,8 +30,14 @@ object CncfCommand {
   final case class Execute(
     args: Vector[String],
     runtimeVersion: Option[String],
-    runtimeDevDir: Option[String]
+    runtimeDevDir: Option[String],
+    developmentTarget: Option[ExecuteDevelopmentTarget] = None
   ) extends CncfCommand
+
+  final case class ExecuteDevelopmentTarget(
+    path: String,
+    explicit: Boolean
+  )
 
   // Deprecated compatibility surface. Keep parsing/execution for existing
   // scripts, but do not advertise cncf dev commands in public help.
@@ -171,7 +177,8 @@ object CncfCommandParser {
             case Some("launcher") =>
               _parse_launcher(rest.tail)
             case Some(_) if _is_runtime_execute(rest) =>
-              CncfCommand.Execute(_runtime_execute_args(rest), runtimeversion, runtimedevdir)
+              val (executeargs, developmenttarget) = _runtime_execute(rest)
+              CncfCommand.Execute(executeargs, runtimeversion, runtimedevdir, developmenttarget)
             case Some(other) =>
               throw CncfException(s"unknown cncf command: $other")
             case None =>
@@ -417,14 +424,29 @@ object CncfCommandParser {
       case _ => false
     }
 
-  private def _runtime_execute_args(args: Vector[String]): Vector[String] =
+  private def _runtime_execute(
+    args: Vector[String]
+  ): (Vector[String], Option[CncfCommand.ExecuteDevelopmentTarget]) =
     args match {
       case Vector(mode, _*) if _is_target_mode(mode) =>
-        mode +: (_current_project_runtime_args(args.tail) ++ args.tail)
+        val activation = _current_project_runtime_args(args.tail)
+        (
+          mode +: (activation ++ args.tail),
+          Option.when(activation.contains("--component-dev-dir=."))(
+            CncfCommand.ExecuteDevelopmentTarget(".", explicit = false)
+          )
+        )
       case Vector(target, mode, rest @ _*) if !target.startsWith("-") && !_is_reserved_target(target) && _is_target_mode(mode) =>
-        mode +: (_target_runtime_args(target) ++ rest.toVector)
+        val trimmed = target.trim
+        (
+          mode +: (_target_runtime_args(trimmed) ++ rest.toVector),
+          Option.when(
+            trimmed == "." ||
+              (_is_path_like_target(trimmed) && !trimmed.endsWith(".car") && !trimmed.endsWith(".sar"))
+          )(CncfCommand.ExecuteDevelopmentTarget(trimmed, explicit = true))
+        )
       case _ =>
-        args
+        (args, None)
     }
 
   private def _current_project_runtime_args(args: Vector[String]): Vector[String] =
@@ -769,7 +791,7 @@ object CncfCommandParser {
       |  install-cli defers runtime selection to launcher configuration unless an explicit runtime option is supplied.
       |  An explicit --runtime or --runtime-dev-dir is pinned into the installed development command and validated against component requirements.
       |  cncf dev is deprecated; use target-first command, server, or client syntax, or install-cli for a fixed development command.
-      |  Config runtime.dev-dir is the configuration equivalent of --runtime-dev-dir.
+      |  Config runtime.dev-dir selects a managed development runtime when no explicit --runtime or --runtime-dev-dir is supplied.
       |  CNCF_VERSION/CNCF_RUNTIME_VERSION override the configured runtime version.
       |  CNCF_RUNTIME_DEV_DIR directly selects a local CNCF runtime checkout.
       |  CNCF_LAUNCHER_DEV_DIR directly selects a local cncf-launcher checkout.
