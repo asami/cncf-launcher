@@ -8,7 +8,8 @@ import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 /*
  * @since   Jul. 18, 2026
- * @version Jul. 24, 2026
+ *  version Jul. 24, 2026
+ * @version Aug. 5, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfTextusControlCenterRegistrationConfig(
@@ -120,8 +121,8 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
     val task = new Runnable {
       def run(): Unit =
         if (registered.get) {
-          if (!_request_best_effort(config, report, token, "heartbeat-subsystem", "running"))
-            registered.set(false)
+          _request_best_effort(config, report, token, "heartbeat-subsystem", "running")
+          ()
         } else {
           registered.set(_request_best_effort(config, report, token, "register-subsystem", "starting"))
         }
