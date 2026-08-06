@@ -10,7 +10,8 @@ import io.circe.syntax.*
 /*
  * @since   May. 17, 2026
  *  version May. 27, 2026
- * @version Jul. 28, 2026
+ *  version Jul. 28, 2026
+ * @version Aug.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -184,7 +185,7 @@ final class CncfLauncher(
     val store = RuntimeVersionStore(paths)
     val runtimeversion = store.current(None, config)
     val classpath = runtimeresolver.resolve(runtimeversion, config, paths)
-    cncfinvoker.invoke(classpath, Vector("--help"))
+    _invoke_cncf(classpath, Vector("--help"))
   }
 
   private def _run_runtime(
@@ -283,7 +284,7 @@ final class CncfLauncher(
         val selector = store.current(runtimeversion, config)
         runtimeresolver.resolve(selector, config, paths)
     }
-    cncfinvoker.invoke(classpath, Vector("version"))
+    _invoke_cncf(classpath, Vector("version"))
   }
 
   private def _run_runtime_current(
@@ -441,7 +442,8 @@ final class CncfLauncher(
       case None =>
         runtimeresolver.resolve(runtimeversion, config, paths)
     }
-    val effectivecommand = command.copy(args = _development_server_args(command, developmenttarget))
+    val developmentargs = _development_server_args(command, developmenttarget)
+    val effectivecommand = command.copy(args = _configured_component_development_args(developmentargs, config))
     val report = _server_report(command, runtimeversion)
     val evidencesession = report.map(_local_evidence_session).getOrElse(CncfLocalServerEvidenceSession.noop)
     val registrationsession = report.map(_registration_session(effectivecommand, config, _)).getOrElse(CncfTextusControlCenterRegistrationSession.noop)
@@ -454,7 +456,7 @@ final class CncfLauncher(
     )
     Runtime.getRuntime.addShutdownHook(shutdownhook)
     try {
-      cncfinvoker.invoke(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ _runtime_command_args(effectivecommand.args))
+      _invoke_cncf(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ _runtime_command_args(effectivecommand.args))
     } finally {
       scala.util.Try(Runtime.getRuntime.removeShutdownHook(shutdownhook))
       registrationsession.close()
@@ -491,7 +493,7 @@ final class CncfLauncher(
     val file = paths.cncfHome.resolve("textus-control-center/server-config.yaml")
     val developmenttarget =
       scala.util.Try(CncfCommandParser.parse(commandargs)).toOption.collect {
-        case command: CncfCommand.Execute if command.args.headOption.contains("server") =>
+        case command: CncfCommand.Execute if command.args.contains("server") =>
           command.developmentTarget.map(target => _development_directory(target.path))
       }.flatten
     if (
@@ -508,26 +510,55 @@ final class CncfLauncher(
     command: CncfCommand.Execute,
     developmenttarget: Option[Path]
   ): Vector[String] =
-    developmenttarget.filter(_ => command.args.headOption.contains("server")).fold(command.args) { project =>
+    developmenttarget.fold(command.args) { project =>
+      val isserver = command.args.contains("server")
+      val isassemblydriven =
+        isserver ||
+          command.args.exists(_.startsWith("--textus.subsystem.file")) ||
+          command.args.exists(_.startsWith("--textus.assembly.descriptor"))
+      val runtimeargs = command.args.map {
+        case value if value.startsWith("--component-dev-dir=") =>
+          val candidate = paths.cwd.resolve(value.stripPrefix("--component-dev-dir=")).normalize.toAbsolutePath.normalize
+          if (isassemblydriven && candidate == project.toAbsolutePath.normalize)
+            s"--repository-component-dev-dir=${project.toAbsolutePath.normalize}"
+          else
+            value
+        case value => value
+      }
       val descriptor = project.resolve("conf/cncf/assembly-standalone.yaml")
-      val hasdescriptor = command.args.exists(_.startsWith("--textus.assembly.descriptor"))
-      val hasport = command.args.exists(value =>
+      val hasdescriptor = runtimeargs.exists(_.startsWith("--textus.assembly.descriptor"))
+      val hasport = runtimeargs.exists(value =>
         value.startsWith("--cncf.server.port") || value.startsWith("--textus.server.port")
       )
       val descriptorargs =
-        if (Files.isRegularFile(descriptor) && !hasdescriptor)
+        if (isserver && Files.isRegularFile(descriptor) && !hasdescriptor)
           Vector(s"--textus.assembly.descriptor=${descriptor.toString}")
         else
           Vector.empty
       val portargs =
-        if (!hasport) _project_default_port(project).toVector.map(port => s"--cncf.server.port=$port")
+        if (isserver && !hasport) _project_default_port(project).toVector.map(port => s"--cncf.server.port=$port")
         else Vector.empty
-      val serverindex = command.args.indexOf("server")
-      if (serverindex < 0)
-        command.args
+      val serverindex = runtimeargs.indexOf("server")
+      if (!isserver || serverindex < 0)
+        runtimeargs
       else
-        command.args.take(serverindex) ++ descriptorargs ++ portargs ++ command.args.drop(serverindex)
+        runtimeargs.take(serverindex) ++ descriptorargs ++ portargs ++ runtimeargs.drop(serverindex)
     }
+
+  private def _configured_component_development_args(
+    args: Vector[String],
+    config: LauncherConfig
+  ): Vector[String] = {
+    val configuredargs = config.devComponentDevDirs
+      .map(path => paths.cwd.resolve(path).normalize.toAbsolutePath.normalize)
+      .distinct
+      .map(path => s"--repository-component-dev-dir=$path")
+    val modeindex = args.indexWhere(arg => arg == "command" || arg == "server" || arg == "client")
+    if (configuredargs.isEmpty || modeindex < 0)
+      args
+    else
+      args.take(modeindex) ++ configuredargs ++ args.drop(modeindex)
+  }
 
   private def _project_default_port(project: Path): Option[String] = {
     val file = project.resolve("project.yaml")
@@ -544,7 +575,7 @@ final class CncfLauncher(
     command: CncfCommand.Execute,
     runtimeversion: String
   ): Option[CncfTextusControlCenterRegistrationReport] =
-    if (!command.args.headOption.contains("server")) {
+    if (!command.args.contains("server")) {
       None
     } else {
       val target = _registration_target(command.args)
@@ -940,7 +971,7 @@ final class CncfLauncher(
     val cncfargs =
       devsupport.cncfArgs(context.copy(runtimeArgs = context.runtimeArgs ++ _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config)), mode, args)
     _with_dev_system_properties(context) {
-      cncfinvoker.invoke(runtimeclasspath ++ devclasspath, cncfargs)
+      _invoke_cncf(runtimeclasspath ++ devclasspath, cncfargs)
     }
   }
 
@@ -983,6 +1014,23 @@ final class CncfLauncher(
       Vector.empty
     else
       Vector(s"--cncf.config.files=${config.cncfConfigFiles.distinct.mkString(",")}")
+
+  private def _invoke_cncf(
+    classpath: Vector[Path],
+    args: Vector[String]
+  ): Int = {
+    val applicationhome = environment.get("HOME").filter(_.nonEmpty).map(Path.of(_).toAbsolutePath.normalize.toString)
+    val previoushome = sys.props.get("user.home")
+    try {
+      applicationhome.foreach(sys.props.update("user.home", _))
+      cncfinvoker.invoke(classpath, args)
+    } finally {
+      previoushome match {
+        case Some(value) => sys.props.update("user.home", value)
+        case None => sys.props.remove("user.home")
+      }
+    }
+  }
 }
 
 object CncfLauncher {

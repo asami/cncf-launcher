@@ -5,11 +5,13 @@ import java.nio.file.Files
 
 /*
  * @since   May. 17, 2026
- * @version Jun.  8, 2026
+ *  version Jun.  8, 2026
+ * @version Aug.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherMain {
   def main(args: Array[String]): Unit = {
+    LauncherPaths.admitApplicationHome()
     val effectiveargs = _args_from_file().getOrElse(args.toVector)
     val code =
       try CncfLauncher().run(effectiveargs)

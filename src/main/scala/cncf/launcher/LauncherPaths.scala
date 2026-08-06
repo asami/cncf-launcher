@@ -4,11 +4,12 @@ import java.nio.file.{Path, Paths}
 
 /*
  * @since   May. 17, 2026
- * @version Jul. 22, 2026
+ *  version Jul. 22, 2026
+ * @version Aug.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class LauncherPaths(
-  home: Path = Paths.get(sys.props.getOrElse("user.home", ".")).toAbsolutePath.normalize,
+  home: Path = LauncherPaths.defaultHome(),
   cwd: Path = Paths.get("").toAbsolutePath.normalize
 ) {
   val cncfHome: Path = home.resolve(".cncf")
@@ -36,4 +37,24 @@ final case class LauncherPaths(
 
   def withCwd(path: Path): LauncherPaths =
     copy(cwd = path.toAbsolutePath.normalize)
+}
+
+object LauncherPaths {
+  private[launcher] def admitApplicationHome(
+    environment: Map[String, String] = sys.env,
+    properties: scala.collection.mutable.Map[String, String] = sys.props
+  ): Unit =
+    environment.get("HOME").map(_.trim).filter(_.nonEmpty).foreach { home =>
+      properties.update("user.home", Paths.get(home).toAbsolutePath.normalize.toString)
+    }
+
+  def defaultHome(
+    environment: Map[String, String] = sys.env,
+    properties: Map[String, String] = sys.props.toMap
+  ): Path =
+    Paths.get(
+      environment.get("HOME").filter(_.nonEmpty)
+        .orElse(properties.get("user.home").filter(_.nonEmpty))
+        .getOrElse(".")
+    ).toAbsolutePath.normalize
 }

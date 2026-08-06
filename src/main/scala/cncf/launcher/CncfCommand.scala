@@ -3,7 +3,8 @@ package cncf.launcher
 /*
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
- * @version Jul. 28, 2026
+ *  version Jul. 28, 2026
+ * @version Aug.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -431,7 +432,7 @@ object CncfCommandParser {
       case Vector(mode, _*) if _is_target_mode(mode) =>
         val activation = _current_project_runtime_args(args.tail)
         (
-          mode +: (activation ++ args.tail),
+          activation ++ (mode +: args.tail),
           Option.when(activation.contains("--component-dev-dir=."))(
             CncfCommand.ExecuteDevelopmentTarget(".", explicit = false)
           )
@@ -439,7 +440,7 @@ object CncfCommandParser {
       case Vector(target, mode, rest @ _*) if !target.startsWith("-") && !_is_reserved_target(target) && _is_target_mode(mode) =>
         val trimmed = target.trim
         (
-          mode +: (_target_runtime_args(trimmed) ++ rest.toVector),
+          _target_runtime_args(trimmed) ++ (mode +: rest.toVector),
           Option.when(
             trimmed == "." ||
               (_is_path_like_target(trimmed) && !trimmed.endsWith(".car") && !trimmed.endsWith(".sar"))

@@ -20,7 +20,7 @@ import LifecycleSupervisorStateStore.given
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug. 5, 2026
+ * @version Aug.  6, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -59,6 +59,7 @@ object CncfLauncherSpec {
     spec.textusControlCenterRegistrationHttpFailureIsolation()
     spec.lifecycleSupervisorFailurePreservesRegistrationHeartbeat()
     spec.executeTargetFirstDelegatesToRuntime()
+    spec.launcherHomeEnvironmentPropagatesToRuntime()
     spec.canonicalDevelopmentTargetsUseConfiguredRuntime()
     spec.canonicalDevelopmentTargetUsesExplicitRuntimeVersion()
     spec.canonicalDevelopmentTargetUsesExplicitDevelopmentRuntime()
@@ -532,6 +533,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         outcome.get shouldBe ()
       }
 
+      "HOME is the shared launcher and CNCF runtime home boundary" in {
+        launcherHomeEnvironmentPropagatesToRuntime()
+      }
+
       "canonical target and runtime boundary" which {
         "CAR development targets use the configured CNCF development runtime" in {
           canonicalDevelopmentTargetsUseConfiguredRuntime()
@@ -960,7 +965,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "command",
       "validate-presentation"
     )).asInstanceOf[CncfCommand.Execute]
-    _assert_equals(currenttarget.args, Vector("command", "--component-dev-dir=.", "validate-presentation"))
+    _assert_equals(currenttarget.args, Vector("--component-dev-dir=.", "command", "validate-presentation"))
     _assert_equals(currenttarget.developmentTarget, Some(CncfCommand.ExecuteDevelopmentTarget(".", explicit = false)))
 
     val explicitcurrenttarget = CncfCommandParser.parse(Vector(
@@ -968,7 +973,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "command",
       "validate-presentation"
     )).asInstanceOf[CncfCommand.Execute]
-    _assert_equals(explicitcurrenttarget.args, Vector("command", "--component-dev-dir=.", "validate-presentation"))
+    _assert_equals(explicitcurrenttarget.args, Vector("--component-dev-dir=.", "command", "validate-presentation"))
     _assert_equals(explicitcurrenttarget.developmentTarget, Some(CncfCommand.ExecuteDevelopmentTarget(".", explicit = true)))
 
     val packagedtarget = CncfCommandParser.parse(Vector(
@@ -985,7 +990,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "command",
       "validate-presentation"
     )).asInstanceOf[CncfCommand.Execute]
-    _assert_equals(namedtarget.args, Vector("command", "--textus.component=textus-sanpomap", "--textus.component.version=1", "validate-presentation"))
+    _assert_equals(namedtarget.args, Vector("--textus.component=textus-sanpomap", "--textus.component.version=1", "command", "validate-presentation"))
   }
 
   def runtimeVersion(): Unit = _with_temp_paths { paths =>
@@ -1713,7 +1718,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(reporter.starts.head._1.subsystemName, Some("textus-registration"))
     _assert_equals(reporter.starts.head._1.subsystemVersion, Some("0.1.0"))
     _assert_equals(reporter.starts.head._2, Some("secret-token"))
-    invoker.lastArgs.head shouldBe "server"
+    invoker.lastArgs.indexOf("server") should be > 0
 
     When("the current-project canonical server command completes")
     val currentprojectcode = launcher.run(Vector("server", "--textus.server.port=18014"))
@@ -1740,7 +1745,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     )
     val outagecode = outagelauncher.run(Vector("textus-registration:0.1.0", "server"))
     _assert_equals(outagecode, 0)
-    outageinvoker.lastArgs.head shouldBe "server"
+    outageinvoker.lastArgs.indexOf("server") should be > 0
 
     When("a supervisor-created server command supplies its opaque instance identity")
     val correlatedinstanceid = "30303030-3030-4030-8030-303030303030"
@@ -2053,7 +2058,42 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     _assert_equals(code, 0)
     _assert_equals(resolver.resolvedClasspaths, Vector("0.4.12"))
-    _assert_equals(invoker.lastArgs, Vector("command", "--textus.component=textus-sanpomap", "--textus.component.version=1", "validate-presentation", "--format", "yaml"))
+    _assert_equals(invoker.lastArgs, Vector("--textus.component=textus-sanpomap", "--textus.component.version=1", "command", "validate-presentation", "--format", "yaml"))
+  }
+
+  def launcherHomeEnvironmentPropagatesToRuntime(): Unit = _with_temp_paths { paths =>
+    Given("an isolated HOME and a different JVM user.home")
+    val isolatedhome = paths.cwd.resolve("isolated-home").toAbsolutePath.normalize
+    val previoushome = sys.props.get("user.home")
+    val originalhome = paths.cwd.resolve("original-jvm-home").toAbsolutePath.normalize.toString
+    sys.props.update("user.home", originalhome)
+    val invoker = FakeInvoker()
+    var observedhome = Option.empty[String]
+    invoker.onInvoke = () => observedhome = sys.props.get("user.home")
+    val launcher = new CncfLauncher(
+      paths,
+      FakeResolver(),
+      invoker,
+      environment = Map("HOME" -> isolatedhome.toString)
+    )
+
+    try {
+      When("the launcher invokes the selected CNCF runtime")
+      launcher.run(Vector("textus-sanpomap:1", "command", "validate-presentation")) shouldBe 0
+
+      Then("HOME is visible during runtime invocation and the prior JVM property is restored")
+      LauncherPaths.defaultHome(Map("HOME" -> isolatedhome.toString), Map("user.home" -> originalhome)) shouldBe isolatedhome
+      val admittedproperties = scala.collection.mutable.Map("user.home" -> originalhome)
+      LauncherPaths.admitApplicationHome(Map("HOME" -> isolatedhome.toString), admittedproperties)
+      admittedproperties.get("user.home") shouldBe Some(isolatedhome.toString)
+      observedhome shouldBe Some(isolatedhome.toString)
+      sys.props.get("user.home") shouldBe Some(originalhome)
+    } finally {
+      previoushome match {
+        case Some(value) => sys.props.update("user.home", value)
+        case None => sys.props.remove("user.home")
+      }
+    }
   }
 
   def canonicalDevelopmentTargetsUseConfiguredRuntime(): Unit = _with_temp_paths { paths =>
@@ -2061,6 +2101,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val externalcar = paths.cwd.resolve("external-car")
     val configuredruntime = paths.cwd.resolve("configured-runtime")
     val configuredruntimeclasspath = configuredruntime.resolve("target").resolve("classes")
+    val configureddependency = paths.cwd.resolve("configured-dependency")
     _write(paths.cwd.resolve("project.yaml"), _component_project_yaml("current-car", "car", "1.0.0-SNAPSHOT"))
     _write(paths.cwd.resolve("build.sbt"), "version := \"1.0.0-SNAPSHOT\"\n")
     _write(externalcar.resolve("project.yaml"), _component_project_yaml("external-car", "car", "1.0.0-SNAPSHOT", 18123))
@@ -2068,7 +2109,15 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _write(externalcar.resolve("conf/cncf/assembly-standalone.yaml"), "textus: {}\n")
     _write(configuredruntime.resolve("build.sbt"), "ThisBuild / version := \"0.5.1-SNAPSHOT\"\n")
     _write(DevSupport.runtimeClasspathFile(configuredruntime), configuredruntimeclasspath.toString)
-    _write(paths.cwd.resolve(".cncf/launcher.yaml"), s"runtime:\n  dev-dir: ${configuredruntime.toString}\n")
+    _write(
+      paths.cwd.resolve(".cncf/launcher.yaml"),
+      s"""runtime:
+         |  dev-dir: ${configuredruntime.toString}
+         |dev:
+         |  component-dev-dirs:
+         |    - ${configureddependency.getFileName}
+         |""".stripMargin
+    )
     val resolver = FakeResolver()
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, resolver, invoker)
@@ -2078,14 +2127,28 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     launcher.run(Vector("server")) shouldBe 0
     launcher.run(Vector(externalcar.toString, "server")) shouldBe 0
 
-    Then("all three retain CAR activation and use the configured runtime rather than either CAR build")
+    Then("all three search the server target and configured dependencies while using the configured runtime")
     _assert_equals(resolver.resolvedClasspaths, Vector.empty)
     invoker.lastClasspath should contain (configuredruntimeclasspath)
-    invoker.lastArgs should contain (s"--component-dev-dir=${externalcar.toString}")
+    invoker.lastArgs.takeWhile(_ != "server") should contain (s"--repository-component-dev-dir=${configureddependency.toAbsolutePath.normalize}")
+    invoker.lastArgs should contain (s"--repository-component-dev-dir=${externalcar.toAbsolutePath.normalize}")
+    invoker.lastArgs should not contain (s"--component-dev-dir=${externalcar.toString}")
     invoker.lastArgs should contain (s"--textus.assembly.descriptor=${externalcar.resolve("conf/cncf/assembly-standalone.yaml")}")
     invoker.lastArgs should contain ("--cncf.server.port=18123")
     val evidence = CncfLocalServerEvidenceStore(paths).latestDevelopmentProfile("external-car").toOption.flatten
     evidence.flatMap(_.developmentDirectory) shouldBe Some(externalcar.toAbsolutePath.normalize.toString)
+
+    When("an external CAR command supplies an explicit Subsystem descriptor")
+    launcher.run(Vector(
+      externalcar.toString,
+      "command",
+      s"--textus.subsystem.file=${externalcar.resolve("src/main/car/assembly-descriptor.yaml")}",
+      "validate-presentation"
+    )) shouldBe 0
+
+    Then("the assembly-driven command searches the target instead of replacing its Subsystem")
+    invoker.lastArgs should contain (s"--repository-component-dev-dir=${externalcar.toAbsolutePath.normalize}")
+    invoker.lastArgs should not contain (s"--component-dev-dir=${externalcar.toString}")
   }
 
   def canonicalDevelopmentTargetUsesExplicitRuntimeVersion(): Unit = _with_temp_paths { paths =>
@@ -2107,9 +2170,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     When("the external CAR is started with the explicit runtime version")
     launcher.run(Vector("--runtime", "0.4.13", externalcar.toString, "server")) shouldBe 0
 
-    Then("the explicit version wins without changing the CAR target")
+    Then("the explicit version wins without changing the CAR server search target")
     resolver.resolvedClasspaths.last shouldBe "0.4.13"
-    invoker.lastArgs should contain (s"--component-dev-dir=${externalcar.toString}")
+    invoker.lastArgs should contain (s"--repository-component-dev-dir=${externalcar.toAbsolutePath.normalize}")
     invoker.lastClasspath should not contain configuredruntime.resolve("target/classes")
   }
 
@@ -2127,9 +2190,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     When("the CAR is started with the explicit development runtime")
     launcher.run(Vector("--runtime-dev-dir", explicitruntime.toString, externalcar.toString, "server")) shouldBe 0
 
-    Then("only the runtime classpath changes and the CAR remains the execution target")
+    Then("only the runtime classpath changes and the CAR remains the server search target")
     invoker.lastClasspath should contain (explicitruntimeclasspath)
-    invoker.lastArgs should contain (s"--component-dev-dir=${externalcar.toString}")
+    invoker.lastArgs should contain (s"--repository-component-dev-dir=${externalcar.toAbsolutePath.normalize}")
   }
 
   def canonicalServerRejectsRuntimeCheckoutTarget(): Unit = _with_temp_paths { paths =>
@@ -2178,7 +2241,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     Then("CAR activation is forwarded without a launcher-owned port override")
     _assert_equals(carcode, 0)
-    _assert_equals(invoker.lastArgs, Vector("server", "--textus.component=textus-sanpomap", "--textus.component.version=1"))
+    _assert_equals(invoker.lastArgs, Vector("--textus.component=textus-sanpomap", "--textus.component.version=1", "server"))
     invoker.lastArgs.exists(_.startsWith("--textus.server.port=")) shouldBe false
     invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")) shouldBe false
 
@@ -2187,7 +2250,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     Then("SAR activation is forwarded without a launcher-owned port override")
     _assert_equals(sarcode, 0)
-    _assert_equals(invoker.lastArgs, Vector("server", "--subsystem-file=textus-platform.sar"))
+    _assert_equals(invoker.lastArgs, Vector("--subsystem-file=textus-platform.sar", "server"))
     invoker.lastArgs.exists(_.startsWith("--textus.server.port=")) shouldBe false
     invoker.lastArgs.exists(_.startsWith("--cncf.server.port=")) shouldBe false
   }
