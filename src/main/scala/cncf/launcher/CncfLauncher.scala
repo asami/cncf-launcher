@@ -11,7 +11,7 @@ import io.circe.syntax.*
  * @since   May. 17, 2026
  *  version May. 27, 2026
  *  version Jul. 28, 2026
- * @version Aug.  6, 2026
+ * @version Aug.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -425,20 +425,38 @@ final class CncfLauncher(
   ): Int = {
     val store = RuntimeVersionStore(paths)
     val developmenttarget = command.developmentTarget.map(_resolve_development_target)
+    val devsupport = DevSupport(paths, classpathexporter, processmanager)
+    val dependencyprojects = config.devComponentDevDirs
+      .map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
+    val runtimerequirements = developmenttarget.toVector
+      .flatMap(target => devsupport.runtimeRequirements(target, dependencyprojects))
     val runtimedevdir =
       command.runtimeDevDir
         .orElse(Option.when(command.runtimeVersion.isEmpty)(config.runtimeDevDir).flatten)
         .map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
     val runtimeversion = runtimedevdir match {
       case Some(dir) =>
+        _validate_development_runtime(dir, runtimerequirements)
         _development_runtime_version(dir)
       case None =>
-        runtimeresolver.resolveVersion(store.current(command.runtimeVersion, config), config, paths)
+        val selected =
+          if (runtimerequirements.isEmpty) {
+            store.current(command.runtimeVersion, config)
+          } else {
+            RuntimeVersionSelection.select(
+              requested = command.runtimeVersion,
+              stored = store.current(None, config),
+              requirements = runtimerequirements,
+              catalog = RuntimeCatalogStore(paths).loadForSelection(config),
+              selectionPolicy = config.runtimeSelectionPolicy.getOrElse(RuntimeSelectionPolicy.CurrentCompatible),
+              policy = config.runtimeNoCompatiblePolicy.getOrElse(RuntimeNoCompatiblePolicy.Error)
+            )
+          }
+        runtimeresolver.resolveVersion(selected, config, paths)
     }
     val classpath = runtimedevdir match {
       case Some(dir) =>
-        DevSupport(paths, classpathexporter, processmanager)
-          .cncfRuntimeClasspath(dir)
+        devsupport.cncfRuntimeClasspath(dir)
       case None =>
         runtimeresolver.resolve(runtimeversion, config, paths)
     }
@@ -497,7 +515,7 @@ final class CncfLauncher(
           command.developmentTarget.map(target => _development_directory(target.path))
       }.flatten
     if (
-      developmenttarget.flatMap(_project_artifact_id).contains("textus-control-center") &&
+      developmenttarget.exists(_is_control_center_project) &&
       Files.isRegularFile(file) &&
       !explicit.contains(file.toString)
     )
@@ -704,6 +722,18 @@ final class CncfLauncher(
     }.toOption.flatten
   }
 
+  private def _is_control_center_project(directory: java.nio.file.Path): Boolean = {
+    val project = directory.resolve("project.yaml")
+    scala.util.Try {
+      val values = LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
+      def _value_(key: String): Option[String] =
+        values.get(key).flatMap(_.headOption).map(_.trim).filter(_.nonEmpty)
+      (_value_("project.namespace").contains("org.simplemodeling.textus") &&
+        _value_("project.id").contains("ControlCenter")) ||
+        _value_("project.name").contains("textus-control-center")
+    }.getOrElse(false)
+  }
+
   private def _standalone_registration_base_url(command: CncfCommand.Execute): Option[String] =
     command.args.collectFirst {
       case value if value.startsWith("--textus.server.port=") => value.stripPrefix("--textus.server.port=")
@@ -754,7 +784,7 @@ final class CncfLauncher(
     val hasdevelopmentruntime = shouldpinruntime && options.runtimeDevDir.orElse(config.runtimeDevDir).isDefined
     val basecatalog =
       if (!shouldpinruntime || hasdevelopmentruntime) None
-      else RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
+      else RuntimeCatalogStore(effectivepaths).loadForSelection(config)
     val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
     val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
     val effectiveoptions = options.copy(
@@ -829,7 +859,7 @@ final class CncfLauncher(
       else
         LauncherConfig.load(effectivepaths, configfiles).mergeHigher(explicitconfig)
     val store = RuntimeVersionStore(effectivepaths)
-    val basecatalog = RuntimeCatalogStore(effectivepaths).loadOrRefresh(config)
+    val basecatalog = RuntimeCatalogStore(effectivepaths).loadForSelection(config)
     val baseconfig = basecatalog.map(config.withCatalog).getOrElse(config)
     val devsupport = new DevSupport(effectivepaths, classpathexporter, processmanager)
     val effectiveoptions = command.options.copy(

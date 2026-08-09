@@ -13,7 +13,8 @@ import org.goldenport.launcher.{LauncherDevInvoker => CoreLauncherDevInvoker}
 /*
  * @since   May. 17, 2026
  *  version May. 18, 2026
- * @version Jun. 27, 2026
+ *  version Jun. 27, 2026
+ * @version Aug.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 trait CncfRuntimeResolver {
@@ -47,7 +48,7 @@ final class CoursierCncfRuntimeResolver(
           _fallback_version(version, config)
       }
     val metadata = paths.runtimeRoot.resolve(concreteversion).resolve("classpath.txt")
-    if (Files.isRegularFile(metadata)) {
+    if (Files.isRegularFile(metadata) && !concreteversion.toUpperCase.contains("SNAPSHOT")) {
       _read_classpath(metadata)
     } else {
       Files.createDirectories(metadata.getParent)

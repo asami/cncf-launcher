@@ -10,7 +10,8 @@ import scala.sys.process.*
 /*
  * @since   May. 17, 2026
  *  version Jun.  8, 2026
- * @version Jul. 24, 2026
+ *  version Jul. 24, 2026
+ * @version Aug.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
@@ -75,9 +76,8 @@ final class DevSupport(
       .map(_.toAbsolutePath.normalize)
       .distinct
     val runtimerequirements =
-      (_runtime_requirement(project, "main-target") ++
-        targetartifact.toVector.flatMap(_.runtimeRequirements) ++
-        devdirs.filterNot(_ == project).flatMap(dir => _runtime_requirement(dir, s"dependency-component:$dir"))).filterNot(_.isEmpty).toVector
+      runtimeRequirements(project, devdirs.filterNot(_ == project)) ++
+        targetartifact.toVector.flatMap(_.runtimeRequirements).filterNot(_.isEmpty)
     DevContext(
       project = project,
       target = options.target,
@@ -93,6 +93,13 @@ final class DevSupport(
       passthrough = options.passthrough
     )
   }
+
+  def runtimeRequirements(
+    project: Path,
+    dependencyProjects: Vector[Path] = Vector.empty
+  ): Vector[RuntimeRequirement] =
+    (_runtime_requirement(project, "main-target") ++
+      dependencyProjects.flatMap(dir => _runtime_requirement(dir, s"dependency-component:$dir"))).filterNot(_.isEmpty).toVector
 
   def writeRuntimeClasspath(context: DevContext): Path = {
     val classpath = classpathexporter.exportRuntimeClasspath(context.project)
@@ -244,8 +251,8 @@ final class DevSupport(
     }
   }
 
-  def cncfRuntimeClasspath(runtimeproject: Path): Vector[Path] = {
-    val file = DevSupport.runtimeClasspathFile(runtimeproject)
+  def cncfRuntimeClasspath(runtimeProject: Path): Vector[Path] = {
+    val file = DevSupport.runtimeClasspathFile(runtimeProject)
     val classpath =
       if (Files.isRegularFile(file) && Files.size(file) > 0L) {
         Files.readString(file, StandardCharsets.UTF_8).trim
@@ -254,7 +261,7 @@ final class DevSupport(
       }
     val entries = _classpath_entries(classpath)
     if (entries.isEmpty)
-      throw CncfException(s"CNCF Runtime / fullClasspath was empty for ${runtimeproject}")
+      throw CncfException(s"CNCF Runtime / fullClasspath was empty for ${runtimeProject}")
     entries
   }
 

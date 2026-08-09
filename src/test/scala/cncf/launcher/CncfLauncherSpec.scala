@@ -20,7 +20,7 @@ import LifecycleSupervisorStateStore.given
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug.  6, 2026
+ * @version Aug.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -45,6 +45,7 @@ object CncfLauncherSpec {
     spec.runtimeVersionPrecedence()
     spec.runtimeUseWritesExpectedFiles()
     spec.runtimeUseSelectsExactLocalSnapshot()
+    spec.snapshotRuntimeRefreshesCachedClasspath()
     spec.runtimeUseAutoSelectsProjectWhenCncfDirectoryExists()
     spec.installCliWritesDevelopmentCommand()
     spec.installCliPinsExplicitRuntimeVersion()
@@ -61,6 +62,7 @@ object CncfLauncherSpec {
     spec.executeTargetFirstDelegatesToRuntime()
     spec.launcherHomeEnvironmentPropagatesToRuntime()
     spec.canonicalDevelopmentTargetsUseConfiguredRuntime()
+    spec.canonicalDevelopmentTargetSelectsCompatibleInstalledRuntime()
     spec.canonicalDevelopmentTargetUsesExplicitRuntimeVersion()
     spec.canonicalDevelopmentTargetUsesExplicitDevelopmentRuntime()
     spec.canonicalServerRejectsRuntimeCheckoutTarget()
@@ -445,6 +447,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         outcome.get shouldBe ()
       }
 
+      "canonical development target selects a compatible installed runtime" in {
+        Given("a CAR target requiring a newer installed SNAPSHOT than the stored runtime")
+        When("the canonical target-first server command selects its runtime")
+        val outcome = scala.util.Try(canonicalDevelopmentTargetSelectsCompatibleInstalledRuntime())
+        Then("the target requirement supersedes the incompatible stored runtime")
+        outcome.get shouldBe ()
+      }
+
       "runtime use writes expected files" in {
         Given("the cncf launcher scenario: runtime use writes expected files")
         When("the launcher behavior is exercised")
@@ -458,6 +468,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         When("the developer selects it as the global runtime")
         val outcome = scala.util.Try(runtimeUseSelectsExactLocalSnapshot())
         Then("the exact SNAPSHOT version is retained for subsequent development commands")
+        outcome.get shouldBe ()
+      }
+
+      "snapshot runtime refreshes its cached classpath" in {
+        Given("a cached classpath for a locally republished SNAPSHOT runtime")
+        When("the runtime resolver resolves that SNAPSHOT again")
+        val outcome = scala.util.Try(snapshotRuntimeRefreshesCachedClasspath())
+        Then("the resolver fetches current dependency metadata instead of reusing the stale classpath")
         outcome.get shouldBe ()
       }
 
@@ -1543,6 +1561,21 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(resolver.resolvedVersions, Vector("0.5.1-SNAPSHOT"))
   }
 
+  def snapshotRuntimeRefreshesCachedClasspath(): Unit = _with_temp_paths { paths =>
+    Given("a stale cached classpath for an exact SNAPSHOT runtime")
+    _write(paths.runtimeCatalog, _catalog_text)
+    _write(paths.runtimeRoot.resolve("0.5.2-SNAPSHOT/classpath.txt"), paths.cwd.resolve("stale-runtime.jar").toString)
+    val resolver = CoursierCncfRuntimeResolver("false")
+
+    When("the SNAPSHOT runtime is resolved")
+    val failure = intercept[CncfException] {
+      resolver.resolve("0.5.2-SNAPSHOT", LauncherConfig().normalizedWithDefaults(paths), paths)
+    }
+
+    Then("the external resolver is invoked rather than accepting the stale classpath")
+    failure.getMessage should include("failed to resolve CNCF runtime 0.5.2-SNAPSHOT with Coursier")
+  }
+
   def runtimeUseAutoSelectsProjectWhenCncfDirectoryExists(): Unit = _with_temp_paths { paths =>
     Files.createDirectories(paths.cwd.resolve(".cncf"))
     val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker())
@@ -1762,9 +1795,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     Given("a Control Center development checkout and its private standalone server configuration")
     _write(paths.cwd.resolve("project.yaml"),
       """project:
-        |  name: textus-control-center
+        |  namespace: "org.simplemodeling.textus"
+        |  id: "ControlCenter"
+        |  title: "Textus Control Center"
+        |  kind: car
         |  component:
-        |    name: textus-control-center
+        |    displayName: "Textus Control Center"
+        |    version: "0.1.0-SNAPSHOT"
         |""".stripMargin)
     val configfile = paths.cncfHome.resolve("textus-control-center").resolve("server-config.yaml")
     _write(configfile, "textus: {}\n")
@@ -1772,7 +1809,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val targetinvoker = FakeInvoker()
 
     When("the current project and an explicit repository target are started from the same directory")
-    new CncfLauncher(paths, FakeResolver(), currentinvoker).run(Vector("server"))
+    new CncfLauncher(paths, FakeResolver(), currentinvoker).run(Vector(".", "server"))
     new CncfLauncher(paths, FakeResolver(), targetinvoker).run(Vector("other-component:0.1.0", "server"))
 
     Then("only the current Control Center server receives the private standalone configuration")
@@ -2149,6 +2186,37 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     Then("the assembly-driven command searches the target instead of replacing its Subsystem")
     invoker.lastArgs should contain (s"--repository-component-dev-dir=${externalcar.toAbsolutePath.normalize}")
     invoker.lastArgs should not contain (s"--component-dev-dir=${externalcar.toString}")
+  }
+
+  def canonicalDevelopmentTargetSelectsCompatibleInstalledRuntime(): Unit = _with_temp_paths { paths =>
+    Given("a CAR requiring CNCF 0.5.2-SNAPSHOT while 0.5.1-SNAPSHOT is stored")
+    _write(
+      paths.cwd.resolve("project.yaml"),
+      """project:
+        |  name: current-car
+        |  kind: car
+        |packaging:
+        |  kind: car
+        |  car:
+        |    runtime:
+        |      cncf:
+        |        minimum: 0.5.2-SNAPSHOT
+        |        tested:
+        |          - 0.5.2-SNAPSHOT
+        |""".stripMargin
+    )
+    _write(paths.globalVersion, "0.5.1-SNAPSHOT\n")
+    _write(paths.runtimeCatalog, _catalog_text)
+    _write(paths.runtimeRoot.resolve("0.5.1-SNAPSHOT/classpath.txt"), "runtime-0.5.1\n")
+    _write(paths.runtimeRoot.resolve("0.5.2-SNAPSHOT/classpath.txt"), "runtime-0.5.2\n")
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    When("the canonical current-project server command starts")
+    launcher.run(Vector(".", "server")) shouldBe 0
+
+    Then("the compatible installed SNAPSHOT is selected before runtime invocation")
+    resolver.resolvedClasspaths.last shouldBe "0.5.2-SNAPSHOT"
   }
 
   def canonicalDevelopmentTargetUsesExplicitRuntimeVersion(): Unit = _with_temp_paths { paths =>

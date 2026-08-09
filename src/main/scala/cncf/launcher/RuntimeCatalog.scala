@@ -8,7 +8,8 @@ import scala.util.Using
 /*
  * @since   May. 17, 2026
  *  version May. 25, 2026
- * @version Jun. 10, 2026
+ *  version Jun. 10, 2026
+ * @version Aug.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class RuntimeCatalog(
@@ -275,10 +276,55 @@ final class RuntimeCatalogStore(paths: LauncherPaths) {
       }
     }
 
+  def loadForSelection(config: LauncherConfig): Option[RuntimeCatalog] = {
+    val localversions = _local_runtime_versions()
+    loadOrRefresh(config) match {
+      case Some(catalog) =>
+        val catalogversions = catalog.versions.map(_.version).toSet
+        Some(catalog.copy(versions = catalog.versions ++ localversions.filterNot(v => catalogversions.contains(v.version))))
+      case None if localversions.nonEmpty =>
+        Some(RuntimeCatalog.empty.copy(versions = localversions))
+      case None =>
+        None
+    }
+  }
+
   private def _load_cached_safe(): Option[RuntimeCatalog] =
     try loadCached()
     catch {
       case _: Throwable => None
+    }
+
+  private def _local_runtime_versions(): Vector[RuntimeCatalogVersion] =
+    if (!Files.isDirectory(paths.runtimeRoot)) {
+      Vector.empty
+    } else {
+      val stream = Files.list(paths.runtimeRoot)
+      try {
+        import scala.jdk.CollectionConverters.*
+        stream.iterator().asScala
+          .filter(Files.isDirectory(_))
+          .filter(path => Files.isRegularFile(path.resolve("classpath.txt")))
+          .map(_.getFileName.toString)
+          .filter(_.nonEmpty)
+          .toVector
+          .distinct
+          .sorted
+          .map { version =>
+            RuntimeCatalogVersion(
+              version = version,
+              channel = Some(if (version.toUpperCase.contains("SNAPSHOT")) "snapshot" else "stable"),
+              status = Some("active"),
+              scalaBinaryVersion = None,
+              module = None,
+              publishedAt = None,
+              checksumUrl = None,
+              metadataUrl = None
+            )
+          }
+      } finally {
+        stream.close()
+      }
     }
 
   private def _read_runtime_catalog_text(config: LauncherConfig): String = {
