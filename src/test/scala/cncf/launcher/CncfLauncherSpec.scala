@@ -20,7 +20,7 @@ import LifecycleSupervisorStateStore.given
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug.  9, 2026
+ * @version Aug. 11, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -97,6 +97,8 @@ object CncfLauncherSpec {
     spec.devNameTargetUsesLocalSnapshotOnly()
     spec.devNameTargetSnapshotBypassesReleaseCatalog()
     spec.devNameTargetUsesReleaseRepositories()
+    spec.devNameTargetUsesSelectedArtifactRepository()
+    spec.devArtifactRepositoryRejectsInvalidTarget()
     spec.devServerEmulationRewritesToCncfArgs()
     spec.devProjectLoadsTargetProjectConfig()
     spec.devHelpExplainsResolutionModel()
@@ -106,6 +108,7 @@ object CncfLauncherSpec {
     spec.devCheckTreatsMissingDependencyClasspathAsError()
     spec.devServerRequiresPreparedMainTargetClasspath()
     spec.runtimeDevelopmentRequiresPreparedClasspath()
+    spec.runtimeDevelopmentReadsNewlineDelimitedClasspath()
     spec.devUsesCurrentCompatibleRuntimeByDefault()
     spec.devCanSelectLatestTestedRuntime()
     spec.devCanSelectLatestCompatibleRuntime()
@@ -800,6 +803,22 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         outcome.get shouldBe ()
       }
 
+      "dev name target uses only its selected artifact repository" in {
+        Given("the same released CAR in local and cache repositories")
+        When("a deprecated dev name target selects the cache repository explicitly")
+        val outcome = scala.util.Try(devNameTargetUsesSelectedArtifactRepository())
+        Then("resolution and runtime arguments retain only the selected repository without defaults")
+        outcome.get shouldBe ()
+      }
+
+      "dev artifact repository rejects missing name or empty selector" in {
+        Given("a deprecated dev artifact repository option")
+        When("it is supplied without a name target or without a value")
+        val outcome = scala.util.Try(devArtifactRepositoryRejectsInvalidTarget())
+        Then("the parser rejects the invalid combination before runtime invocation")
+        outcome.get shouldBe ()
+      }
+
       "dev server emulation rewrites to cncf args" in {
         Given("the cncf launcher scenario: dev server emulation rewrites to cncf args")
         When("the launcher behavior is exercised")
@@ -860,6 +879,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         Given("the cncf launcher scenario: runtime development requires prepared classpath")
         When("the launcher behavior is exercised")
         val outcome = scala.util.Try(runtimeDevelopmentRequiresPreparedClasspath())
+        Then("the executable specification holds through scenario-specific expectations")
+        outcome.get shouldBe ()
+      }
+
+      "runtime development reads newline-delimited classpath entries in order" in {
+        Given("the cncf launcher scenario: runtime development reads newline-delimited classpath entries in order")
+        When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(runtimeDevelopmentReadsNewlineDelimitedClasspath())
         Then("the executable specification holds through scenario-specific expectations")
         outcome.get shouldBe ()
       }
@@ -1715,7 +1742,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       """textus-control-center:
         |  registration:
         |    enabled: true
-        |    endpoint: https://admin.example.test/rest/v1/textus-control-center/subsystem-inventory
+        |    endpoint: https://admin.example.test/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory
         |    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
         |    timeout: 2s
         |    heartbeat-interval: 30s
@@ -1823,12 +1850,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val token = root.resolve("credentials").resolve("launcher-registration.token")
     _write(token, "standalone-token\n")
     Files.setPosixFilePermissions(token, java.util.Set.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ, java.nio.file.attribute.PosixFilePermission.OWNER_WRITE))
-    _write(root.resolve("standalone-locator.yaml"),
+    val locator = root.resolve("standalone-locator.yaml")
+    _write(locator,
       """schemaVersion: 1
         |profile: standalone
         |scopeId: scope-test
         |installationId: standalone-test
-        |endpoint: http://127.0.0.1:18013/rest/v1/textus-control-center/subsystem-inventory
+        |endpoint: http://127.0.0.1:18013/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory
         |credentialRef: credentials/launcher-registration.token
         |timeout: 2s
         |heartbeatInterval: 30s
@@ -1849,6 +1877,21 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     reporter.starts.map(_._2) shouldBe Vector(Some("standalone-token"), Some("standalone-token"))
     reporter.configs.head.baseUrl shouldBe "http://127.0.0.1:18014"
     _assert_equals(reporter.closes, 2)
+
+    When("the locator advertises the legacy inventory route")
+    _write(locator, Files.readString(locator).replace(
+      "/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory",
+      "/rest/v1/textus-control-center/subsystem-inventory"
+    ))
+
+    Then("the legacy locator route is rejected without compatibility fallback")
+    CncfTextusControlCenterStandaloneLocator.resolve(paths) shouldBe None
+
+    Given("the canonical locator route is restored for the following credential scenario")
+    _write(locator, Files.readString(locator).replace(
+      "/rest/v1/textus-control-center/subsystem-inventory",
+      "/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory"
+    ))
 
     When("the shared credential is no longer owner-readable and owner-writable only")
     Files.setPosixFilePermissions(token, java.util.Set.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ))
@@ -1891,7 +1934,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     server.start()
     try {
       val config = CncfTextusControlCenterRegistrationConfig(
-        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-control-center/subsystem-inventory",
+        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory",
         tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
         timeout = java.time.Duration.ofSeconds(1),
         heartbeatInterval = java.time.Duration.ofSeconds(30),
@@ -1998,7 +2041,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     server.start()
     try {
       val config = CncfTextusControlCenterRegistrationConfig(
-        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/textus-control-center/subsystem-inventory",
+        endpoint = s"http://127.0.0.1:${server.getAddress.getPort}/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory",
         tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
         timeout = java.time.Duration.ofSeconds(1),
         heartbeatInterval = java.time.Duration.ofSeconds(30),
@@ -2046,7 +2089,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     try {
       val supervisorendpoint = s"http://127.0.0.1:${supervisor.getAddress.getPort}/v1/lifecycle-requests"
       val configuration = CncfTextusControlCenterRegistrationConfig(
-        endpoint = s"http://127.0.0.1:${controlcenter.getAddress.getPort}/rest/v1/textus-control-center/subsystem-inventory",
+        endpoint = s"http://127.0.0.1:${controlcenter.getAddress.getPort}/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory",
         tokenEnv = "TEXTUS_ADMIN_REGISTRATION_TOKEN",
         timeout = java.time.Duration.ofSeconds(1),
         heartbeatInterval = java.time.Duration.ofMillis(10),
@@ -2463,6 +2506,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     _assert_equals(server.options.componentDevDirs, Vector("../account"))
     _assert_equals(server.options.runtimeArgs, Vector("--repository-dir", "repository.d"))
 
+    val selected = CncfCommandParser.parse(Vector("dev", "server", "--name=textus-art-scene", "--artifact-repository=https://example.com/repository/car"))
+      .asInstanceOf[CncfCommand.Dev.Server]
+    _assert_equals(selected.options.artifactRepository, Some("https://example.com/repository/car"))
+
     val command = CncfCommandParser.parse(Vector("dev", "command", "blog.post.search", "limit=10"))
       .asInstanceOf[CncfCommand.Dev.Command]
     _assert_equals(command.operation, "blog.post.search")
@@ -2516,7 +2563,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
          |textus-control-center:
          |  registration:
          |    enabled: true
-         |    endpoint: https://admin.example.test/rest/v1/textus-control-center/subsystem-inventory
+         |    endpoint: https://admin.example.test/rest/v1/org-simplemodeling-textus-control-center/subsystem-inventory
          |    token-env: TEXTUS_ADMIN_REGISTRATION_TOKEN
          |    host-label: acceptance
          |    base-url: https://subsystem.example.test
@@ -2906,6 +2953,40 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     invoker.lastArgs.contains(s"--repository-dir=${paths.cacheCarRepository}") shouldBe true
   }
 
+  def devNameTargetUsesSelectedArtifactRepository(): Unit = _with_temp_paths { paths =>
+    val name = "textus-demo"
+    val version = "0.1.0"
+    _write(paths.localCarRepository.resolve(name).resolve(version).resolve(s"$name-$version.car"), "local-car")
+    _write(paths.cacheCarRepository.resolve(name).resolve(version).resolve(s"$name-$version.car"), "cache-car")
+    val selectedrepository = paths.cacheCarRepository.toString
+    val resolved = CncfArtifactResolver().resolve(
+      CncfArtifactSelector.parse(s"$name:$version"),
+      LauncherConfig.load(paths),
+      Some(selectedrepository)
+    )
+    val invoker = FakeInvoker()
+    val launcher = new CncfLauncher(paths, FakeResolver(), invoker)
+
+    launcher.run(Vector("dev", "server", "--name", s"$name:$version", "--artifact-repository", selectedrepository))
+
+    resolved.repositories shouldBe Vector(selectedrepository)
+    invoker.lastArgs shouldBe Vector(
+      "--no-default-components",
+      s"--repository-dir=$selectedrepository",
+      s"--textus.component=$name",
+      s"--textus.component.version=$version",
+      "server"
+    )
+  }
+
+  def devArtifactRepositoryRejectsInvalidTarget(): Unit = {
+    val withoutname = Try(CncfCommandParser.parse(Vector("dev", "server", "--artifact-repository", "repository"))).failed.toOption
+    val emptyvalue = Try(CncfCommandParser.parse(Vector("dev", "server", "--name", "textus-demo", "--artifact-repository="))).failed.toOption
+
+    withoutname.map(_.getMessage) shouldBe Some("--artifact-repository requires --name")
+    emptyvalue.map(_.getMessage) shouldBe Some("--artifact-repository requires a nonempty value")
+  }
+
   def devServerEmulationRewritesToCncfArgs(): Unit = _with_temp_paths { paths =>
     val classdir = paths.cwd.resolve("target").resolve("classes")
     Files.createDirectories(classdir)
@@ -2951,6 +3032,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     help.contains("Low-level dev commands:") shouldBe false
     help.contains("cncf dev server") shouldBe false
     help.contains("cncf dev is deprecated") shouldBe true
+    help.contains("--artifact-repository <dir|url> to select one exclusive artifact repository") shouldBe true
     help.contains("dev-server.pid") shouldBe false
     help.contains("--component-dev-dir <dir> is a dependency component local override") shouldBe true
     help.contains("cozyPublishLocalCar") shouldBe true
@@ -3045,6 +3127,21 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     failure.getMessage.contains("development runtime classpath not found") shouldBe true
     exporter.projects shouldBe empty
+  }
+
+  def runtimeDevelopmentReadsNewlineDelimitedClasspath(): Unit = _with_temp_paths { paths =>
+    Given("a prepared runtime classpath file containing two newline-separated absolute paths")
+    val runtimeproject = paths.cwd.resolve("runtime")
+    val firstpath = runtimeproject.resolve("target").resolve("classes")
+    val secondpath = runtimeproject.resolve("dependency").resolve("classes")
+    _write(DevSupport.runtimeClasspathFile(runtimeproject), s"$firstpath\n$secondpath\n")
+    val support = new DevSupport(paths, FakeClasspathExporter.failure("SBT must not run"))
+
+    When("the runtime classpath is read")
+    val classpath = support.cncfRuntimeClasspath(runtimeproject)
+
+    Then("both entries are retained in source order")
+    classpath shouldBe Vector(firstpath, secondpath)
   }
 
   def devUsesCurrentCompatibleRuntimeByDefault(): Unit = _with_temp_paths { paths =>

@@ -4,7 +4,7 @@ package cncf.launcher
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug.  6, 2026
+ * @version Aug.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -48,6 +48,7 @@ object CncfCommand {
 
   final case class DevOptions(
     target: DevTarget = DevTarget.ProjectDev(None),
+    artifactRepository: Option[String] = None,
     runtimeVersion: Option[String] = None,
     runtimeSelectionPolicy: Option[RuntimeSelectionPolicy] = None,
     runtimeNoCompatiblePolicy: Option[RuntimeNoCompatiblePolicy] = None,
@@ -551,6 +552,7 @@ object CncfCommandParser {
   ): (CncfCommand.DevOptions, Vector[String]) = {
     val rest = Vector.newBuilder[String]
     var target: Option[CncfCommand.DevTarget] = None
+    var artifactrepository: Option[String] = None
     var runtimedevdir = globalruntimedevdir
     var selectionpolicy = globalselectionpolicy
     var runtimepolicy = nocompatiblepolicy
@@ -582,6 +584,13 @@ object CncfCommandParser {
           i += 2
         case x if x.startsWith("--name=") =>
           target = _set_dev_target(target, CncfCommand.DevTarget.Name(x.stripPrefix("--name=")))
+          i += 1
+        case "--artifact-repository" =>
+          if (i + 1 >= args.length) throw CncfException("--artifact-repository requires a value")
+          artifactrepository = Some(_artifact_repository(args(i + 1)))
+          i += 2
+        case x if x.startsWith("--artifact-repository=") =>
+          artifactrepository = Some(_artifact_repository(x.stripPrefix("--artifact-repository=")))
           i += 1
         case "--car-file" =>
           if (i + 1 >= args.length) throw CncfException("--car-file requires a value")
@@ -674,8 +683,12 @@ object CncfCommandParser {
           i = args.length
       }
     }
+    val effectivetarget = target.getOrElse(CncfCommand.DevTarget.ProjectDev(None))
+    if (artifactrepository.nonEmpty && !effectivetarget.isInstanceOf[CncfCommand.DevTarget.Name])
+      throw CncfException("--artifact-repository requires --name")
     (CncfCommand.DevOptions(
-      target = target.getOrElse(CncfCommand.DevTarget.ProjectDev(None)),
+      target = effectivetarget,
+      artifactRepository = artifactrepository,
       runtimeVersion = runtimeversion,
       runtimeSelectionPolicy = selectionpolicy,
       runtimeNoCompatiblePolicy = runtimepolicy,
@@ -699,6 +712,9 @@ object CncfCommandParser {
       case Some(_) => throw CncfException("cncf dev target options are mutually exclusive: use only one of --project-dev, --name, --car-file, --project-car")
       case None => Some(next)
     }
+
+  private def _artifact_repository(value: String): String =
+    Option(value).map(_.trim).filter(_.nonEmpty).getOrElse(throw CncfException("--artifact-repository requires a nonempty value"))
 
   private def _runtime_arg_takes_value(arg: String): Boolean = {
     val name = arg.takeWhile(_ != '=')
@@ -816,6 +832,7 @@ object CncfCommandParser {
       |  Target-first execution adds target activation before command/server/client.
       |  <target> may be a component name, component:version, .car file, .sar file, or local component development directory.
       |  Named targets are resolved through configured component/subsystem repositories.
+      |  Deprecated dev --name supports --artifact-repository <dir|url> to select one exclusive artifact repository.
       |  File targets activate that packaged artifact directly.
       |  Component source directories used as targets are passed as component-dev-dir runtime activation.
       |  Launcher settings load from ~/.cncf/launcher.yaml, ancestor conf/cncf/launcher.yaml and .cncf/launcher.yaml files, then cwd conf/cncf/launcher.yaml and .cncf/launcher.yaml.

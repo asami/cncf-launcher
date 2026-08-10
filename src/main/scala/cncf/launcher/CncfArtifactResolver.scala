@@ -6,7 +6,8 @@ import scala.util.Using
 
 /*
  * @since   May. 26, 2026
- * @version Jun.  3, 2026
+ *  version Jun.  3, 2026
+ * @version Aug.  9, 2026
  * @author  ASAMI, Tomoharu
  */
 enum CncfArtifactKind {
@@ -56,22 +57,23 @@ final case class CncfResolvedArtifact(
 final class CncfArtifactResolver {
   def resolve(
     selector: CncfArtifactSelector,
-    config: LauncherConfig
+    config: LauncherConfig,
+    artifactRepository: Option[String] = None
   ): CncfResolvedArtifact =
     selector.kind match {
       case CncfArtifactKind.Car =>
-        _resolve_artifact(selector, config.carRepositories, ".car") match {
+        _resolve_artifact(selector, config.carRepositories, ".car", artifactRepository) match {
           case Some(x) => x.copy(selector = x.selector.copy(kind = CncfArtifactKind.Car), kind = CncfArtifactKind.Car)
           case None => throw CncfException(_not_found_message("CAR", selector))
         }
       case CncfArtifactKind.Sar =>
-        _resolve_artifact(selector, config.sarRepositories, ".sar") match {
+        _resolve_artifact(selector, config.sarRepositories, ".sar", artifactRepository) match {
           case Some(x) => x.copy(selector = x.selector.copy(kind = CncfArtifactKind.Sar), kind = CncfArtifactKind.Sar)
           case None => throw CncfException(_not_found_message("SAR", selector))
         }
       case CncfArtifactKind.Auto =>
-        val car = _resolve_artifact(selector, config.carRepositories, ".car")
-        val sar = _resolve_artifact(selector, config.sarRepositories, ".sar")
+        val car = _resolve_artifact(selector, config.carRepositories, ".car", artifactRepository)
+        val sar = _resolve_artifact(selector, config.sarRepositories, ".sar", artifactRepository)
         (car, sar) match {
           case (Some(x), None) => x.copy(selector = x.selector.copy(kind = CncfArtifactKind.Car), kind = CncfArtifactKind.Car)
           case (None, Some(x)) => x.copy(selector = x.selector.copy(kind = CncfArtifactKind.Sar), kind = CncfArtifactKind.Sar)
@@ -83,9 +85,10 @@ final class CncfArtifactResolver {
   private def _resolve_artifact(
     selector: CncfArtifactSelector,
     repositories: Vector[String],
-    suffix: String
+    suffix: String,
+    artifactrepository: Option[String]
   ): Option[CncfResolvedArtifact] = {
-    val effective = _effective_repositories(selector, repositories)
+    val effective = artifactrepository.map(Vector(_)).getOrElse(_effective_repositories(selector, repositories))
     effective.view.flatMap(repo => _resolve_artifact_in_repository(selector, repo, suffix, effective)).headOption
   }
 

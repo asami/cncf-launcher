@@ -4,6 +4,7 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.time.Instant
+import java.util.regex.Pattern
 import scala.util.Try
 import scala.sys.process.*
 
@@ -11,13 +12,14 @@ import scala.sys.process.*
  * @since   May. 17, 2026
  *  version Jun.  8, 2026
  *  version Jul. 24, 2026
- * @version Aug.  9, 2026
+ * @version Aug. 10, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class DevContext(
   project: Path,
   target: CncfCommand.DevTarget,
   targetArgs: Vector[String],
+  artifactRepository: Option[String],
   port: String,
   componentDevDirs: Vector[Path],
   runtimeVersion: String,
@@ -66,8 +68,8 @@ final class DevSupport(
     store: RuntimeVersionStore
   ): DevContext = {
     val project = _resolve_project(options, config)
-    val targetartifact = _target_artifact(options.target, config)
-    val targetargs = _target_args(options.target, project, targetartifact)
+    val targetartifact = _target_artifact(options.target, config, options.artifactRepository)
+    val targetargs = _target_args(options.target, project, targetartifact, options.artifactRepository)
     val projectdevdirs =
       if (_is_project_dev(options.target) && options.includeProjectDevDir) Vector(project)
       else Vector.empty
@@ -82,6 +84,7 @@ final class DevSupport(
       project = project,
       target = options.target,
       targetArgs = targetargs,
+      artifactRepository = options.artifactRepository,
       port = options.port.orElse(config.devPort).getOrElse(LauncherConfig.DEFAULT_DEV_PORT),
       componentDevDirs = devdirs,
       runtimeVersion = store.current(options.runtimeVersion, config),
@@ -233,7 +236,8 @@ final class DevSupport(
     mode: String,
     args: Vector[String]
   ): Vector[String] =
-    context.targetArgs ++
+    context.artifactRepository.toVector.flatMap(repository => Vector("--no-default-components", s"--repository-dir=$repository")) ++
+      context.targetArgs ++
       context.componentDevDirs.flatMap(dir => Vector("--component-dev-dir", dir.toString)) ++
       _execution_profile_args(context) ++
       context.runtimeArgs ++
@@ -289,7 +293,8 @@ final class DevSupport(
   private def _target_args(
     target: CncfCommand.DevTarget,
     project: Path,
-    targetartifact: Option[CncfResolvedArtifact]
+    targetartifact: Option[CncfResolvedArtifact],
+    artifactrepository: Option[String]
   ): Vector[String] =
     target match {
       case CncfCommand.DevTarget.ProjectDev(_) =>
@@ -299,25 +304,28 @@ final class DevSupport(
       case CncfCommand.DevTarget.ProjectCar(_) =>
         Vector("--component-file", _project_car_file(project).toString)
       case CncfCommand.DevTarget.Name(value) =>
-        _name_target_args(targetartifact.getOrElse(throw CncfException("resolved artifact is missing for --name target")))
+        _name_target_args(targetartifact.getOrElse(throw CncfException("resolved artifact is missing for --name target")), artifactrepository.isEmpty)
     }
 
   private def _target_artifact(
     target: CncfCommand.DevTarget,
-    config: LauncherConfig
+    config: LauncherConfig,
+    artifactrepository: Option[String]
   ): Option[CncfResolvedArtifact] =
     target match {
       case CncfCommand.DevTarget.Name(value) =>
-        Some(CncfArtifactResolver().resolve(CncfArtifactSelector.parse(value), config))
+        Some(CncfArtifactResolver().resolve(CncfArtifactSelector.parse(value), config, artifactrepository))
       case _ =>
         None
     }
 
   private def _name_target_args(
-    artifact: CncfResolvedArtifact
+    artifact: CncfResolvedArtifact,
+    includerepositories: Boolean
   ): Vector[String] = {
     val repositoryargs =
-      artifact.kind match {
+      if (!includerepositories) Vector.empty
+      else artifact.kind match {
         case CncfArtifactKind.Car =>
           artifact.repositories.map(r => s"--repository-dir=$r")
         case CncfArtifactKind.Sar =>
@@ -658,7 +666,8 @@ final class DevSupport(
 
   private def _classpath_entries(value: String): Vector[Path] =
     value
-      .split(File.pathSeparator)
+      .linesIterator
+      .flatMap(_.split(Pattern.quote(File.pathSeparator)))
       .toVector
       .map(_.trim)
       .filter(_.nonEmpty)
