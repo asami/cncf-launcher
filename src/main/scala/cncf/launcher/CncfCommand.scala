@@ -4,7 +4,7 @@ package cncf.launcher
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug.  9, 2026
+ * @version Aug. 12, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -277,7 +277,7 @@ object CncfCommandParser {
       case "list" if positional.isEmpty => CncfCommand.Repository.ListArtifacts(kind, includedevelopment, developmentdirs)
       case "show" if positional.size == 1 => CncfCommand.Repository.Show(positional.head, kind, includedevelopment, developmentdirs)
       case "list" => throw CncfException("cncf repository list accepts only repository options")
-      case "show" => throw CncfException("cncf repository show requires one artifact id or component directory")
+      case "show" => throw CncfException("cncf repository show requires one qualified component id, artifact id, or component directory")
       case other => throw CncfException(s"unknown cncf repository command: $other")
     }
   }
@@ -797,7 +797,7 @@ object CncfCommandParser {
       |  cncf runtime cache status
       |  cncf runtime config show
       |  cncf repository list [--kind car|sar] [--include-development] [--development-dir <dir>...]
-      |  cncf repository show <artifact-id|component-dir> [--kind car|sar] [--include-development] [--development-dir <dir>...]
+      |  cncf repository show <qualified-component-id|artifact-id|component-dir> [--kind car|sar] [--include-development] [--development-dir <dir>...]
       |
       |Runtime:
       |  --runtime <version> overrides .cncf/version and ~/.cncf/version.

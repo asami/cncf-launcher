@@ -20,7 +20,7 @@ import LifecycleSupervisorStateStore.given
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug. 11, 2026
+ * @version Aug. 12, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -120,10 +120,11 @@ object CncfLauncherSpec {
     spec.runtimeCommandDoesNotLoadCncf()
     spec.componentRepositoryCommandParser()
     spec.componentRepositoryDevelopmentOverridesLocalIdentity()
+    spec.componentRepositoryPreservesNamespaceQualifiedCarIdentity()
     spec.componentRepositoryRejectsImplicitDevelopmentDirectory()
     spec.componentRepositoryShowUsesDescriptorIdentity()
     spec.componentRepositoryOutputMatchesTextusIdentityColumns()
-    spec.componentRepositoryMalformedLocalIndexIsDiagnosed()
+    spec.componentRepositoryRejectsInvalidLocalIndex()
     spec.componentRepositoryCommandDoesNotLoadCncfRuntime()
     spec.lifecycleSupervisorResolvesRetainedDevelopmentProfile()
     spec.lifecycleSupervisorUsesRetainedMutationOrder()
@@ -199,6 +200,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         componentRepositoryDevelopmentOverridesLocalIdentity()
       }
 
+      "preserve namespace-qualified CAR identity through list and show selection" in {
+        componentRepositoryPreservesNamespaceQualifiedCarIdentity()
+      }
+
       "reject implicit development directory discovery" in {
         componentRepositoryRejectsImplicitDevelopmentDirectory()
       }
@@ -211,8 +216,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         componentRepositoryOutputMatchesTextusIdentityColumns()
       }
 
-      "diagnose a malformed local index without leaking its path" in {
-        componentRepositoryMalformedLocalIndexIsDiagnosed()
+      "reject malformed and legacy local indexes without mutating the warehouse" in {
+        componentRepositoryRejectsInvalidLocalIndex()
       }
 
       "run repository discovery without loading CNCF runtime" in {
@@ -3344,6 +3349,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       .asInstanceOf[CncfCommand.Repository.ListArtifacts]
     val show = CncfCommandParser.parse(Vector("repository", "show", "textus-blog", "--kind=sar"))
       .asInstanceOf[CncfCommand.Repository.Show]
+    val missing = intercept[CncfException] {
+      CncfCommandParser.parse(Vector("repository", "show"))
+    }
 
     Then("kind, current project admission, and extra directories remain explicit")
     list.kind shouldBe Some("car")
@@ -3351,6 +3359,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     list.developmentDirs shouldBe Vector("../dependency")
     show.target shouldBe "textus-blog"
     show.kind shouldBe Some("sar")
+    missing.getMessage should include("qualified component id, artifact id, or component directory")
+    CncfCommandParser.helpText should include("<qualified-component-id|artifact-id|component-dir>")
   }
 
   def localServerEvidenceProjection(): Unit = _with_temp_paths { paths =>
@@ -3425,20 +3435,55 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   }
 
   def componentRepositoryDevelopmentOverridesLocalIdentity(): Unit = _with_temp_paths { paths =>
-    Given("a local repository entry and an admitted checkout with the same descriptor identity")
-    _write(paths.localRepository.resolve("repository/catalog/index.json"), _component_repository_index("car", "textus-blog", "1.0.0"))
-    _write(paths.cwd.resolve("checkout/project.yaml"), _component_project_yaml("textus-blog", "car", "1.1.0-SNAPSHOT"))
+    Given("namespace-distinct local CARs sharing one artifact ID and an admitted checkout for one exact canonical identity")
+    _write(paths.localRepository.resolve("repository/catalog/index.json"), _component_repository_v2_index)
+    _write(
+      paths.cwd.resolve("checkout/project.yaml"),
+      _component_project_yaml("textus-shared", "car", "1.4.0-SNAPSHOT", canonicalnamespace = Some("org.alpha.textus"), canonicalid = Some("Shared"))
+    )
     val discovery = CncfComponentRepositoryDiscovery(paths)
 
     When("CNCF lists component repository entries")
     val result = discovery.list(None, false, Vector("checkout"))
 
-    Then("the development entry overrides the local release entry")
-    result.artifacts should have size 1
-    result.artifacts.head.origin shouldBe "development"
-    result.artifacts.head.status shouldBe "active"
-    result.artifacts.head.recommended shouldBe Some("1.1.0-SNAPSHOT")
-    result.artifacts.head.render should not include paths.cwd.toString
+    Then("development precedence applies only to the exact namespace-qualified CAR identity")
+    result.artifacts should have size 3
+    result.artifacts.find(_.qualifiedComponentId.contains("org.alpha.textus.Shared")).map(_.origin) shouldBe Some("development")
+    result.artifacts.find(_.qualifiedComponentId.contains("org.alpha.textus.Shared")).flatMap(_.recommended) shouldBe Some("1.4.0-SNAPSHOT")
+    result.artifacts.find(_.qualifiedComponentId.contains("org.beta.textus.Shared")).map(_.origin) shouldBe Some("local")
+    result.artifacts.find(_.qualifiedComponentId.contains("org.alpha.textus.Shared")).map(_.render) should not contain paths.cwd.toString
+  }
+
+  def componentRepositoryPreservesNamespaceQualifiedCarIdentity(): Unit = _with_temp_paths { paths =>
+    Given("a v2 index with a SAR and namespace-distinct CARs sharing one derived artifact ID")
+    _write(paths.localRepository.resolve("repository/catalog/index.json"), _component_repository_v2_index)
+    val discovery = CncfComponentRepositoryDiscovery(paths)
+
+    When("CNCF lists entries and shows CARs by qualified Component IDs or a unique artifact ID")
+    val listed = discovery.list(None, false, Vector.empty)
+    val alpha = discovery.show("org.alpha.textus.Shared", Some("car"), false, Vector.empty)
+    val beta = discovery.show("org.beta.textus.Shared", Some("car"), false, Vector.empty)
+    val platform = discovery.show("textus-platform", Some("sar"), false, Vector.empty)
+    val ambiguous = intercept[CncfException] {
+      discovery.show("textus-shared", Some("car"), false, Vector.empty)
+    }
+
+    Then("both CARs survive with their canonical identities, artifact fallback is unique-only, and the six-column rendering remains stable")
+    listed.artifacts.map(_.identity) shouldBe Vector(
+      ("car", "org.alpha.textus", "Shared"),
+      ("car", "org.beta.textus", "Shared"),
+      ("sar", "", "textus-platform")
+    )
+    alpha.artifact.qualifiedComponentId shouldBe Some("org.alpha.textus.Shared")
+    beta.artifact.qualifiedComponentId shouldBe Some("org.beta.textus.Shared")
+    platform.artifact.identity shouldBe ("sar", "", "textus-platform")
+    alpha.artifact.render.split("\\t").toVector should have size 6
+    alpha.artifact.renderDetailed should include("namespace: org.alpha.textus")
+    alpha.artifact.renderDetailed should include("local-id: Shared")
+    alpha.artifact.renderDetailed should include("qualified-component-id: org.alpha.textus.Shared")
+    ambiguous.getMessage should include("artifact is ambiguous")
+    ambiguous.getMessage should include("org.alpha.textus.Shared")
+    ambiguous.getMessage should include("org.beta.textus.Shared")
   }
 
   def componentRepositoryRejectsImplicitDevelopmentDirectory(): Unit = _with_temp_paths { paths =>
@@ -3485,18 +3530,58 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     columns should have size 6
   }
 
-  def componentRepositoryMalformedLocalIndexIsDiagnosed(): Unit = _with_temp_paths { paths =>
-    Given("a malformed machine-local component repository index")
-    _write(paths.localRepository.resolve("repository/catalog/index.json"), "{not-json")
+  def componentRepositoryRejectsInvalidLocalIndex(): Unit = _with_temp_paths { paths =>
+    Given("a valid v2 machine-local index and every invalid present-index contract variant")
+    val indexpath = paths.localRepository.resolve("repository/catalog/index.json")
+    val source = _component_repository_v2_index
+    val invalidindextexts = Vector(
+      "malformed JSON" -> "{not-json",
+      "legacy v1 schema" -> _legacy_component_repository_index,
+      "unsupported non-v1 schema" -> source.replace("cncf.component-repository-index.v2", "cncf.component-repository-index.v3"),
+      "missing CAR namespace" -> source.replaceFirst("      \"namespace\": \"org.alpha.textus\",\n", ""),
+      "null CAR id" -> source.replaceFirst("\"id\": \"Shared\"", "\"id\": null"),
+      "wrong-type CAR namespace" -> source.replaceFirst("\"namespace\": \"org.alpha.textus\"", "\"namespace\": 7"),
+      "wrong-type CAR id" -> source.replaceFirst("\"id\": \"Shared\"", "\"id\": 7"),
+      "unknown root field" -> source.replaceFirst("  \"generatedAt\": \"2026-08-07T00:00:00Z\",", "  \"generatedAt\": \"2026-08-07T00:00:00Z\",\n  \"unexpected\": true,"),
+      "unknown entry field" -> source.replaceFirst("      \"catalog\": \"sar/textus-platform.yaml\",", "      \"unexpected\": true,\n      \"catalog\": \"sar/textus-platform.yaml\","),
+      "duplicate JSON object field" -> source.replaceFirst("  \"generatedAt\": \"2026-08-07T00:00:00Z\",", "  \"generatedAt\": \"2026-08-07T00:00:00Z\",\n  \"generatedAt\": \"2026-08-07T00:00:00Z\","),
+      "invalid generatedAt" -> source.replace("2026-08-07T00:00:00Z", "not-an-instant"),
+      "invalid status" -> source.replaceFirst("\"status\": \"active\"", "\"status\": \"unknown\""),
+      "empty selector" -> source.replaceFirst("\"recommended\": \"1.0.0\"", "\"recommended\": \"\""),
+      "null selector" -> source.replaceFirst("\"recommended\": \"1.0.0\"", "\"recommended\": null"),
+      "invalid namespace" -> source.replaceFirst("\"namespace\": \"org.alpha.textus\"", "\"namespace\": \"Org.alpha.textus\""),
+      "invalid local ID" -> source.replaceFirst("\"id\": \"Shared\"", "\"id\": \"shared\""),
+      "wrong CAR artifact projection" -> source.replaceFirst("\"artifactId\": \"textus-shared\"", "\"artifactId\": \"other-artifact\""),
+      "wrong CAR catalog" -> source.replace("car/org/alpha/textus/textus-shared.yaml", "car/textus-shared.yaml"),
+      "CAR catalog traversal" -> source.replace("car/org/alpha/textus/textus-shared.yaml", "../car/org/alpha/textus/textus-shared.yaml"),
+      "CAR catalog backslash" -> source.replace("car/org/alpha/textus/textus-shared.yaml", "car\\\\org\\\\alpha\\\\textus\\\\textus-shared.yaml"),
+      "CAR catalog absolute path" -> source.replace("car/org/alpha/textus/textus-shared.yaml", "/car/org/alpha/textus/textus-shared.yaml"),
+      "SAR namespace and id fields" -> source.replaceFirst("      \"kind\": \"sar\",", "      \"kind\": \"sar\",\n      \"namespace\": \"org.alpha.textus\",\n      \"id\": \"Shared\","),
+      "wrong SAR catalog" -> source.replace("sar/textus-platform.yaml", "sar/textus-platform.txt"),
+      "SAR catalog traversal" -> source.replace("sar/textus-platform.yaml", "../sar/textus-platform.yaml"),
+      "duplicate canonical identity" -> source.replace("org.beta.textus", "org.alpha.textus").replace("car/org/beta/textus", "car/org/alpha/textus")
+    )
+    val invalidindexes = invalidindextexts.map { case (label, contents) =>
+      label -> contents.getBytes(StandardCharsets.UTF_8)
+    } :+ ("malformed UTF-8 bytes" -> Array[Byte](0x7b.toByte, 0x22.toByte, 0xc3.toByte, 0x28.toByte))
 
-    When("CNCF discovers local components")
-    val result = CncfComponentRepositoryDiscovery(paths).list(None, false, Vector.empty)
+    invalidindexes.foreach { case (label, contents) =>
+      Given(s"an invalid present machine-local component repository index: $label")
+      _write_bytes(indexpath, contents)
+      val beforebytes = Files.readAllBytes(indexpath).toVector
+      val beforetree = _tree(paths.localRepository)
 
-    Then("the invalid source is ignored and diagnosed without exposing an absolute path")
-    result.artifacts shouldBe empty
-    result.diagnostics should have size 1
-    result.diagnostics.head should include("ignored malformed local component repository index")
-    result.diagnostics.head should not include paths.home.toString
+      When("CNCF lists or shows the invalid local repository state")
+      val listfailure = intercept[CncfException] {
+        CncfComponentRepositoryDiscovery(paths).list(None, false, Vector.empty)
+      }
+      val showfailure = intercept[CncfException] {
+        CncfComponentRepositoryDiscovery(paths).show("missing", None, false, Vector.empty)
+      }
+
+      Then("both operations fail closed with the complete operator-owned recovery procedure and no warehouse mutation")
+      _assert_component_repository_index_rejection(paths, indexpath, label, listfailure, showfailure, beforebytes, beforetree)
+    }
   }
 
   def componentRepositoryCommandDoesNotLoadCncfRuntime(): Unit = _with_temp_paths { paths =>
@@ -4291,6 +4376,41 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     Files.writeString(path, value)
   }
 
+  private def _write_bytes(path: Path, value: Array[Byte]): Unit = {
+    Files.createDirectories(path.getParent)
+    Files.write(path, value)
+  }
+
+  private def _tree(root: Path): Vector[String] = {
+    val stream = Files.walk(root)
+    try stream.iterator.asScala.map(path => root.relativize(path).toString).toVector.sorted
+    finally stream.close()
+  }
+
+  private def _assert_component_repository_index_rejection(
+    paths: LauncherPaths,
+    indexpath: Path,
+    label: String,
+    listfailure: CncfException,
+    showfailure: CncfException,
+    beforebytes: Vector[Byte],
+    beforetree: Vector[String]
+  ): Unit = withClue(label) {
+    Vector(listfailure, showfailure).foreach { failure =>
+      failure.getMessage should include(paths.localRepository.toString)
+      failure.getMessage should include(indexpath.toString)
+      failure.getMessage should include("1. Stop processes using the active warehouse.")
+      failure.getMessage should include("2. Copy or move the whole active warehouse to a timestamped forensic sibling.")
+      failure.getMessage should include("3. Create an empty active warehouse.")
+      failure.getMessage should include("4. Republish canonical CAR/SAR artifacts from source with cozyPublishLocalCar/cozyPublishLocalSar as applicable.")
+      failure.getMessage should include("5. Retry the original launcher operation.")
+      failure.getMessage should include("6. Verify with `cncf repository list` that only canonical v2 entries are active.")
+      failure.getMessage should include("The launcher performed no backup, merge, migration, deletion, or rebuild mutation.")
+    }
+    Files.readAllBytes(indexpath).toVector shouldBe beforebytes
+    _tree(paths.localRepository) shouldBe beforetree
+  }
+
   private def _write_zip(
     path: Path,
     entry: String,
@@ -4409,10 +4529,26 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
        |${tested.map(v => s"          - $v").mkString("\n")}
        |""".stripMargin
 
-  private def _component_project_yaml(artifactid: String, kind: String, version: String, port: Int = 18013): String =
+  private def _component_project_yaml(
+    artifactid: String,
+    kind: String,
+    version: String,
+    port: Int = 18013,
+    canonicalnamespace: Option[String] = None,
+    canonicalid: Option[String] = None
+  ): String = {
+    val identityfields = kind match {
+      case "car" =>
+        val (derivednamespace, derivedid) = _fixture_car_identity(artifactid)
+        s"       |  namespace: ${canonicalnamespace.getOrElse(derivednamespace)}\n" +
+          s"       |  id: ${canonicalid.getOrElse(derivedid)}\n"
+      case "sar" => ""
+      case other => throw new IllegalArgumentException(s"unsupported fixture component kind: $other")
+    }
     s"""project:
        |  name: $artifactid
        |  kind: $kind
+$identityfields
        |  component:
        |    name: component-name-that-does-not-define-artifact-identity
        |    version: $version
@@ -4421,6 +4557,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
        |packaging:
        |  kind: $kind
        |""".stripMargin
+  }
 
   private def _supervisor_yaml(supervisorid: String, port: Int, tokenenv: String): String =
     s"""schema: cncf.launcher.supervisor.v1
@@ -4465,20 +4602,89 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       startedAt = java.time.Instant.now()
     )
 
-  private def _component_repository_index(kind: String, artifactid: String, version: String): String =
+  private def _component_repository_index(kind: String, artifactid: String, version: String): String = {
+    val (namespace, id, catalog) = kind match {
+      case "car" =>
+        val (canonicalnamespace, localid) = _fixture_car_identity(artifactid)
+        (Some(canonicalnamespace), Some(localid), s"car/${canonicalnamespace.replace('.', '/')}/$artifactid.yaml")
+      case "sar" => (None, None, s"sar/$artifactid.yaml")
+      case other => throw new IllegalArgumentException(s"unsupported fixture component kind: $other")
+    }
+    val identityfields = namespace.map(value => s"    \"namespace\": \"$value\",\n").getOrElse("") +
+      id.map(value => s"    \"id\": \"$value\",\n").getOrElse("")
     s"""{
-       |  "schemaVersion": "cncf.component-repository-index.v1",
+       |  "schemaVersion": "cncf.component-repository-index.v2",
        |  "generatedAt": "2026-07-21T00:00:00Z",
        |  "artifacts": [{
        |    "kind": "$kind",
+       |$identityfields
        |    "artifactId": "$artifactid",
-       |    "catalog": "$kind/$artifactid.yaml",
+       |    "catalog": "$catalog",
        |    "status": "active",
        |    "recommended": "$version",
        |    "latestStable": "$version"
        |  }]
        |}
        |""".stripMargin
+  }
+
+  private def _fixture_car_identity(artifactid: String): (String, String) = {
+    val separator = artifactid.indexOf('-')
+    require(separator > 0 && separator + 1 < artifactid.length, s"CAR fixture requires an artifactId with namespace and local-id projections: $artifactid")
+    val localid = artifactid.drop(separator + 1).split("-").map(part => part.head.toUpper.toString + part.tail).mkString
+    s"org.example.${artifactid.take(separator)}" -> localid
+  }
+
+  private val _component_repository_v2_index: String =
+    """{
+      |  "schemaVersion": "cncf.component-repository-index.v2",
+      |  "generatedAt": "2026-08-07T00:00:00Z",
+      |  "artifacts": [
+      |    {
+      |      "kind": "sar",
+      |      "artifactId": "textus-platform",
+      |      "catalog": "sar/textus-platform.yaml",
+      |      "status": "active",
+      |      "recommended": "1.0.0",
+      |      "latestStable": "1.0.0"
+      |    },
+      |    {
+      |      "kind": "car",
+      |      "namespace": "org.alpha.textus",
+      |      "id": "Shared",
+      |      "artifactId": "textus-shared",
+      |      "catalog": "car/org/alpha/textus/textus-shared.yaml",
+      |      "status": "active",
+      |      "recommended": "1.2.0",
+      |      "latestStable": "1.2.0",
+      |      "latestSnapshot": "1.3.0-SNAPSHOT"
+      |    },
+      |    {
+      |      "kind": "car",
+      |      "namespace": "org.beta.textus",
+      |      "id": "Shared",
+      |      "artifactId": "textus-shared",
+      |      "catalog": "car/org/beta/textus/textus-shared.yaml",
+      |      "status": "active"
+      |    }
+      |  ]
+      |}
+      |""".stripMargin
+
+  private def _legacy_component_repository_index: String =
+    """{
+      |  "schemaVersion": "cncf.component-repository-index.v1",
+      |  "generatedAt": "2026-07-21T00:00:00Z",
+      |  "artifacts": [{
+      |    "kind": "car",
+      |    "artifactId": "legacy-component",
+      |    "catalog": "car/legacy-component.yaml",
+      |    "status": "active",
+      |    "recommended": "1.0.0",
+      |    "latestStable": "1.0.0"
+      |  }]
+      |}
+      |""".stripMargin
 }
 
 final class FakeResolver(

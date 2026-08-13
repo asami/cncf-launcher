@@ -7,7 +7,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import scala.util.Try
 import io.circe.{ACursor, Decoder, HCursor, Json}
-import io.circe.parser
+import io.circe.jawn.JawnParser
 
 /*
  * Development/local consumer of the CNCF Component Repository identity model.
@@ -15,7 +15,7 @@ import io.circe.parser
  * project.yaml rather than filesystem names.
  *
  * @since   Jul. 21, 2026
- * @version Jul. 21, 2026
+ * @version Aug. 12, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfComponentRepositoryEntry(
@@ -27,9 +27,16 @@ final case class CncfComponentRepositoryEntry(
   latestSnapshot: Option[String],
   source: String,
   origin: String,
-  freshness: Instant
+  freshness: Instant,
+  namespace: Option[String] = None,
+  id: Option[String] = None
 ) {
-  def identity: (String, String) = kind -> artifactId
+  def identity: (String, String, String) =
+    if (kind == "car") (kind, namespace.getOrElse(""), id.getOrElse(""))
+    else (kind, "", artifactId)
+
+  def qualifiedComponentId: Option[String] =
+    Option.when(kind == "car")(s"${namespace.getOrElse("-")}.${id.getOrElse("-")}")
 
   def render: String = {
     val selector = recommended.orElse(latestStable).orElse(latestSnapshot).getOrElse("-")
@@ -39,6 +46,9 @@ final case class CncfComponentRepositoryEntry(
   def renderDetailed: String =
     Vector(
       s"kind: $kind",
+      s"namespace: ${namespace.getOrElse("-")}",
+      s"local-id: ${id.getOrElse("-")}",
+      s"qualified-component-id: ${qualifiedComponentId.getOrElse("-")}",
       s"artifact-id: $artifactId",
       s"status: $status",
       s"recommended: ${recommended.getOrElse("-")}",
@@ -56,9 +66,9 @@ final case class CncfComponentRepositoryShowResult(artifact: CncfComponentReposi
 final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
   import CncfComponentRepositoryDiscovery.*
 
-  def list(kind: Option[String], includedevelopment: Boolean, developmentdirs: Vector[String]): CncfComponentRepositoryResult = {
+  def list(kind: Option[String], includeDevelopment: Boolean, developmentDirs: Vector[String]): CncfComponentRepositoryResult = {
     val (local, localdiagnostics) = _local_entries()
-    val admitted = (developmentdirs ++ Option.when(includedevelopment)(".")).distinct
+    val admitted = (developmentDirs ++ Option.when(includeDevelopment)(".")).distinct
     val attempts = admitted.map(_development_entry)
     val development = attempts.flatMap(_._1)
     val diagnostics = localdiagnostics ++ attempts.flatMap(_._2)
@@ -67,25 +77,38 @@ final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
       val priority = values.map(_priority).min
       val samepriority = values.filter(_priority(_) == priority).sortBy(_.source)
       val warning = Option.when(samepriority.map(_.source).distinct.size > 1)(
-        s"conflicting ${identity._1}:${identity._2} entries at equal precedence; selected ${safeSource(samepriority.head.source)}"
+        s"conflicting ${identity.productIterator.mkString(":")} entries at equal precedence; selected ${safeSource(samepriority.head.source)}"
       )
       samepriority.head -> warning
     }
     CncfComponentRepositoryResult(selected.map(_._1), diagnostics ++ selected.flatMap(_._2))
   }
 
-  def show(target: String, kind: Option[String], includedevelopment: Boolean, developmentdirs: Vector[String]): CncfComponentRepositoryShowResult = {
+  def show(target: String, kind: Option[String], includeDevelopment: Boolean, developmentDirs: Vector[String]): CncfComponentRepositoryShowResult = {
     val targetpath = paths.cwd.resolve(target).normalize.toAbsolutePath.normalize
     val direct = Option.when(Files.isDirectory(targetpath))(target)
-    val result = list(kind, includedevelopment, developmentdirs ++ direct)
-    val matches = direct match {
-      case Some(_) => result.artifacts.filter(entry => entry.origin == "development" && entry.source == targetpath.toString)
-      case None => result.artifacts.filter(_.artifactId == target)
-    }
-    val selected = matches match {
-      case Vector(value) => value
-      case Vector() => throw CncfException(s"component repository artifact not found: ${_safe_target(target)}")
-      case _ => throw CncfException(s"component repository artifact is ambiguous; specify --kind: ${_safe_target(target)}")
+    val result = list(kind, includeDevelopment, developmentDirs ++ direct)
+    val selected = direct match {
+      case Some(value) =>
+        _development_entry(value)._1.filter(entry => kind.forall(_ == entry.kind)).getOrElse {
+          throw CncfException(s"component repository artifact not found: ${_safe_target(target)}")
+        }
+      case None =>
+        val qualified = result.artifacts.filter(_.qualifiedComponentId.contains(target))
+        qualified match {
+          case Vector(value) => value
+          case Vector() =>
+            result.artifacts.filter(_.artifactId == target) match {
+              case Vector(value) => value
+              case Vector() => throw CncfException(s"component repository artifact not found: ${_safe_target(target)}")
+              case values =>
+                val choices = values.flatMap(_.qualifiedComponentId).sorted
+                val guidance = if (choices.nonEmpty) s"; select one of: ${choices.mkString(", ")}" else ""
+                throw CncfException(s"component repository artifact is ambiguous: ${_safe_target(target)}$guidance")
+            }
+          case values =>
+            throw CncfException(s"component repository qualified component id is ambiguous: ${_safe_target(target)}: ${values.flatMap(_.qualifiedComponentId).sorted.mkString(", ")}")
+        }
     }
     CncfComponentRepositoryShowResult(selected, result.diagnostics)
   }
@@ -94,38 +117,42 @@ final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
     val indexpath = paths.localRepository.resolve("repository/catalog/index.json")
     if (!Files.isRegularFile(indexpath)) Vector.empty -> Vector.empty
     else {
-      val text = Files.readString(indexpath, StandardCharsets.UTF_8)
-      Try(_parse_index(text, paths.localRepository.resolve("repository").toString)).toEither match {
+      Try {
+        val text = Files.readString(indexpath, StandardCharsets.UTF_8)
+        _parse_index(text, paths.localRepository.resolve("repository").toString)
+      }.toEither match {
         case Right(entries) => entries -> Vector.empty
-        case Left(error) => Vector.empty -> Vector(s"ignored malformed local component repository index ${safeSource(indexpath.toString)}: ${error.getMessage}")
+        case Left(_) => throw _rejected_local_index(indexpath)
       }
     }
   }
 
   private def _parse_index(text: String, source: String): Vector[CncfComponentRepositoryEntry] = {
-    val json = parser.parse(text).fold(error => throw CncfException(s"invalid component repository index JSON: ${error.message}"), identity)
+    val json = _strict_json_parser.parse(text).fold(error => throw CncfException(s"invalid component repository index JSON: ${error.getClass.getSimpleName}"), identity)
     val cursor = json.hcursor
     _only_fields(cursor, Set("schemaVersion", "generatedAt", "artifacts"), "index")
     val schema = _required[String](cursor, "schemaVersion", "index")
     if (schema != SCHEMA_VERSION) throw CncfException(s"unsupported component repository index schemaVersion: $schema")
     val generatedtext = _required[String](cursor, "generatedAt", "index")
     val generatedat = Try(Instant.parse(generatedtext)).getOrElse(throw CncfException(s"invalid component repository index generatedAt: $generatedtext"))
-    val entries = _required[Vector[Json]](cursor, "artifacts", "index").zipWithIndex.map { case (value, index) =>
+    val parsedentries = _required[Vector[Json]](cursor, "artifacts", "index").zipWithIndex.map { case (value, index) =>
       val entrycursor = value.hcursor
       val context = s"artifact[$index]"
-      _only_fields(entrycursor, Set("kind", "artifactId", "catalog", "status", "recommended", "latestStable", "latestSnapshot"), context)
+      _only_fields(entrycursor, Set("kind", "namespace", "id", "artifactId", "catalog", "status", "recommended", "latestStable", "latestSnapshot"), context)
       val artifactkind = _required[String](entrycursor, "kind", context)
+      val namespace = _optional[String](entrycursor, "namespace", context)
+      val id = _optional[String](entrycursor, "id", context)
       val artifactid = _required[String](entrycursor, "artifactId", context)
       val catalog = _required[String](entrycursor, "catalog", context)
       val status = _required[String](entrycursor, "status", context)
-      _validate_identity(artifactkind, artifactid, catalog, status)
+      _validate_identity(artifactkind, namespace, id, artifactid, catalog, status)
       val recommended = _optional[String](entrycursor, "recommended", context)
       val lateststable = _optional[String](entrycursor, "latestStable", context)
       val latestsnapshot = _optional[String](entrycursor, "latestSnapshot", context)
       Vector(recommended, lateststable, latestsnapshot).flatten.foreach { selector =>
         if (selector.trim.isEmpty) throw CncfException(s"component repository selector must not be empty: $artifactkind:$artifactid")
       }
-      CncfComponentRepositoryEntry(
+      val entry = CncfComponentRepositoryEntry(
         artifactkind,
         artifactid,
         status,
@@ -134,12 +161,15 @@ final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
         latestsnapshot,
         source,
         "local",
-        generatedat
+        generatedat,
+        namespace,
+        id
       )
-    }.sortBy(_.identity)
-    val duplicates = entries.groupBy(_.identity).collect { case (identity, values) if values.size > 1 => s"${identity._1}:${identity._2}" }.toVector.sorted
+      entry
+    }
+    val duplicates = parsedentries.groupBy(_.identity).collect { case (identity, values) if values.size > 1 => identity.productIterator.mkString(":") }.toVector.sorted
     if (duplicates.nonEmpty) throw CncfException(s"duplicate component repository artifacts: ${duplicates.mkString(", ")}")
-    entries
+    parsedentries.sortBy(_.identity)
   }
 
   private def _development_entry(value: String): (Option[CncfComponentRepositoryEntry], Vector[String]) = {
@@ -152,9 +182,11 @@ final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
         val values = LauncherConfigParser.parse(descriptor, Files.readString(descriptor, StandardCharsets.UTF_8))
         def _first_(key: String): Option[String] = values.getOrElse(key, Vector.empty).headOption.map(_.trim).filter(_.nonEmpty)
         val artifactkind = _first_("project.kind").orElse(_first_("packaging.kind")).getOrElse(throw CncfException("project.yaml requires project.kind"))
+        val namespace = _first_("project.namespace")
+        val id = _first_("project.id")
         val artifactid = _first_("project.name").getOrElse(throw CncfException("project.yaml requires project.name"))
         val version = _first_("project.component.version").orElse(_first_("project.version"))
-        _validate_development_identity(artifactkind, artifactid)
+        _validate_development_identity(artifactkind, namespace, id, artifactid)
         CncfComponentRepositoryEntry(
           artifactkind,
           artifactid,
@@ -164,7 +196,9 @@ final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
           version.filter(_.endsWith("-SNAPSHOT")),
           directory.toString,
           "development",
-          Files.getLastModifiedTime(descriptor).toInstant
+          Files.getLastModifiedTime(descriptor).toInstant,
+          namespace,
+          id
         )
       }.toEither match {
         case Right(entry) => Some(entry) -> Vector.empty
@@ -175,23 +209,82 @@ final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
     }
   }
 
-  private def _validate_identity(kind: String, artifactid: String, catalog: String, status: String): Unit = {
-    _validate_development_identity(kind, artifactid)
+  private def _validate_identity(
+    kind: String,
+    namespace: Option[String],
+    id: Option[String],
+    artifactid: String,
+    catalog: String,
+    status: String
+  ): Unit = {
+    _validate_artifact_id(artifactid)
     if (!VALID_STATUSES.contains(status)) throw CncfException(s"invalid component repository artifact status: $status")
-    val extension = Vector(".yaml", ".yml", ".json").find(catalog.endsWith)
-    if (!extension.exists(ext => catalog == s"$kind/$artifactid$ext")) throw CncfException(s"invalid component repository catalog path: $catalog")
+    kind match {
+      case "car" =>
+        val canonicalnamespace = namespace.getOrElse(throw CncfException("CAR repository entry requires namespace"))
+        val canonicalid = id.getOrElse(throw CncfException("CAR repository entry requires id"))
+        _validate_namespace(canonicalnamespace)
+        _validate_local_id(canonicalid)
+        val expectedartifactid = s"${canonicalnamespace.split("\\.").last}-${_kebab_case(canonicalid)}"
+        if (artifactid != expectedartifactid) throw CncfException("CAR repository artifactId does not match its canonical namespace/id distribution projection")
+        val expectedcatalog = s"car/${canonicalnamespace.replace('.', '/')}/$artifactid.yaml"
+        if (catalog != expectedcatalog) throw CncfException("CAR repository catalog does not match its canonical namespace/id distribution projection")
+      case "sar" =>
+        if (namespace.nonEmpty || id.nonEmpty) throw CncfException("SAR repository entry must not carry component namespace or id")
+        val extension = Vector(".yaml", ".yml", ".json").find(catalog.endsWith)
+        if (!extension.exists(ext => catalog == s"sar/$artifactid$ext")) throw CncfException("invalid component repository catalog path")
+      case other => throw CncfException(s"unsupported component artifact kind: $other")
+    }
   }
 
-  private def _validate_development_identity(kind: String, artifactid: String): Unit = {
+  private def _validate_development_identity(kind: String, namespace: Option[String], id: Option[String], artifactid: String): Unit = {
     if (!VALID_KINDS.contains(kind)) throw CncfException(s"unsupported component artifact kind: $kind")
+    _validate_artifact_id(artifactid)
+    kind match {
+      case "car" =>
+        val canonicalnamespace = namespace.getOrElse(throw CncfException("CAR development descriptor requires project.namespace"))
+        val canonicalid = id.getOrElse(throw CncfException("CAR development descriptor requires project.id"))
+        _validate_namespace(canonicalnamespace)
+        _validate_local_id(canonicalid)
+        val expectedartifactid = s"${canonicalnamespace.split("\\.").last}-${_kebab_case(canonicalid)}"
+        if (artifactid != expectedartifactid) throw CncfException("CAR development descriptor project.name does not match its canonical project.namespace/project.id distribution projection")
+      case "sar" =>
+        if (namespace.nonEmpty || id.nonEmpty) throw CncfException("SAR development descriptor must not carry project.namespace or project.id")
+    }
+  }
+
+  private def _validate_artifact_id(artifactid: String): Unit = {
     if (!ARTIFACT_ID_PATTERN.matches(artifactid)) throw CncfException(s"invalid component repository artifactId: $artifactid")
   }
+
+  private def _validate_namespace(value: String): Unit = {
+    val segments = value.split("\\.", -1).toVector
+    if (segments.size < 2 || segments.exists(segment => !NAMESPACE_SEGMENT_PATTERN.matches(segment) || RESERVED_NAMESPACE_SEGMENTS.contains(segment)))
+      throw CncfException("invalid CAR repository namespace")
+  }
+
+  private def _validate_local_id(value: String): Unit =
+    if (!LOCAL_ID_PATTERN.matches(value)) throw CncfException("invalid CAR repository local id")
+
+  private def _kebab_case(value: String): String =
+    value.indices.map { index =>
+      val current = value.charAt(index)
+      val boundary = index > 0 && current.isUpper && (
+        value.charAt(index - 1).isLower || value.charAt(index - 1).isDigit ||
+          (index > 1 && value.charAt(index - 1).isUpper && value.charAt(index - 2).isUpper && index + 1 < value.length && value.charAt(index + 1).isLower)
+      )
+      s"${if (boundary) "-" else ""}${current.toLower}"
+    }.mkString
 
   private def _required[A: Decoder](cursor: ACursor, field: String, context: String): A =
     cursor.get[A](field).fold(error => throw CncfException(s"component repository index $context requires $field: ${error.message}"), identity)
 
-  private def _optional[A: Decoder](cursor: ACursor, field: String, context: String): Option[A] =
-    cursor.get[Option[A]](field).fold(error => throw CncfException(s"invalid component repository index $context $field: ${error.message}"), identity)
+  private def _optional[A: Decoder](cursor: HCursor, field: String, context: String): Option[A] =
+    cursor.downField(field).focus match {
+      case None => None
+      case Some(json) if json.isNull => throw CncfException(s"component repository index $context $field must not be null")
+      case Some(_) => cursor.get[A](field).fold(error => throw CncfException(s"invalid component repository index $context $field: ${error.message}"), Some(_))
+    }
 
   private def _only_fields(cursor: HCursor, expected: Set[String], context: String): Unit = {
     val unknown = cursor.keys.toVector.flatten.filterNot(expected).sorted
@@ -204,13 +297,34 @@ final class CncfComponentRepositoryDiscovery(paths: LauncherPaths) {
     val original = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
     sensitivevalues.distinct.foldLeft(original) { (message, sensitive) => message.replace(sensitive, safeSource(sensitive)) }
   }
+
+  private def _rejected_local_index(indexpath: Path): CncfException =
+    new CncfException(
+      s"""rejected local component repository index as invalid, legacy, or unsupported canonical v2 state
+         |active warehouse: ${paths.localRepository}
+         |rejected index: $indexpath
+         |Recovery procedure (operator-owned):
+         |1. Stop processes using the active warehouse.
+         |2. Copy or move the whole active warehouse to a timestamped forensic sibling.
+         |3. Create an empty active warehouse.
+         |4. Republish canonical CAR/SAR artifacts from source with cozyPublishLocalCar/cozyPublishLocalSar as applicable.
+         |5. Retry the original launcher operation.
+         |6. Verify with `cncf repository list` that only canonical v2 entries are active.
+         |The launcher performed no backup, merge, migration, deletion, or rebuild mutation.""".stripMargin
+    )
 }
 
 object CncfComponentRepositoryDiscovery {
-  val SCHEMA_VERSION = "cncf.component-repository-index.v1"
+  val SCHEMA_VERSION = "cncf.component-repository-index.v2"
   private val VALID_KINDS = Set("car", "sar")
   private val VALID_STATUSES = Set("active", "deprecated", "disabled")
   private val ARTIFACT_ID_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]*".r
+  private val NAMESPACE_SEGMENT_PATTERN = "[a-z][a-z0-9]*".r
+  private val LOCAL_ID_PATTERN = "[A-Z][A-Za-z0-9]*".r
+  private val RESERVED_NAMESPACE_SEGMENTS = Set(
+    "abstract", "as", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "default", "def", "derives", "do", "double", "else", "end", "enum", "erased", "export", "exports", "extends", "extension", "false", "final", "finally", "float", "for", "given", "goto", "if", "implements", "implicit", "import", "infix", "inline", "instanceof", "int", "interface", "lazy", "long", "macro", "match", "module", "native", "new", "null", "object", "opaque", "open", "opens", "override", "package", "permits", "private", "protected", "provides", "public", "record", "requires", "return", "sealed", "short", "static", "strictfp", "super", "switch", "synchronized", "then", "this", "throw", "throws", "to", "trait", "transient", "transitive", "transparent", "true", "try", "type", "uses", "using", "val", "var", "void", "volatile", "when", "while", "with", "yield"
+  )
+  private val _strict_json_parser = JawnParser(allowDuplicateKeys = false)
 
   def apply(paths: LauncherPaths): CncfComponentRepositoryDiscovery = new CncfComponentRepositoryDiscovery(paths)
 

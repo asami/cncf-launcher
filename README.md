@@ -19,7 +19,7 @@ cncf runtime use 0.5.1-SNAPSHOT --global
 
 cncf repository list
 cncf repository list --kind car --include-development
-cncf repository show textus-blog --kind car
+cncf repository show org.example.textus.Blog --kind car
 cncf repository show ../textus-blog
 
 cncf /Users/asami/src/dev2026/textus-sanpomap command validate-presentation --presentationDsl presentation-dsl.yaml
@@ -32,8 +32,24 @@ CAR/SAR catalog under `~/.cncf/local`. Development checkouts are excluded by
 default. Admit the current checkout with `--include-development`, admit other
 checkouts explicitly with repeatable `--development-dir <dir>`, or pass a
 component directory directly to `repository show`. Development identity comes
-from `project.yaml`, not the directory name, and overrides a matching local
-artifact while preserving the shared six-column repository output contract.
+from `project.yaml`, not the directory name, and overrides only its exact
+canonical CAR identity while preserving the shared six-column repository output
+contract. Select a CAR with its qualified Component ID (`namespace.id`) whenever
+multiple CAR namespaces share one derived artifact ID. Artifact-ID selection is
+retained only when it identifies exactly one entry; `--kind` cannot disambiguate
+namespace-distinct CARs of the same kind.
+
+Repository commands accept only the canonical component repository-index v2
+state. If the resolved active warehouse's `repository/catalog/index.json` is
+malformed, legacy, unsupported, or otherwise invalid, `repository list` and
+`repository show` fail closed and print that warehouse and index path. The
+operator must: (1) stop processes using the active warehouse; (2) copy or move
+the whole warehouse to a timestamped forensic sibling; (3) create an empty
+active warehouse; (4) republish canonical CAR/SAR artifacts from source with
+`cozyPublishLocalCar`/`cozyPublishLocalSar` as applicable; (5) retry the
+original command; and (6) verify `cncf repository list` reports only canonical
+v2 entries. The launcher performs no backup, merge, migration, deletion, or
+rebuild mutation.
 
 `cncf dev ...` is deprecated. Use target-first `command`, `server`, and
 `client` syntax. `cncf dev` remains only as a compatibility alias and is not
