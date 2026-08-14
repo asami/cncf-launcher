@@ -11,7 +11,7 @@ import io.circe.syntax.*
  * @since   May. 17, 2026
  *  version May. 27, 2026
  *  version Jul. 28, 2026
- * @version Aug.  9, 2026
+ * @version Aug. 14, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -703,24 +703,37 @@ final class CncfLauncher(
   private def _project_component_name(directory: java.nio.file.Path): Option[String] = {
     val project = directory.resolve("project.yaml")
     scala.util.Try {
-      LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
+      val values = LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
+      values
         .get("project.component.name")
         .flatMap(_.headOption)
         .map(_.trim)
         .filter(_.nonEmpty)
+        .orElse(values.get("project.id").flatMap(_.headOption).map(_.trim).filter(_.nonEmpty))
     }.toOption.flatten
   }
 
   private def _project_artifact_id(directory: java.nio.file.Path): Option[String] = {
     val project = directory.resolve("project.yaml")
     scala.util.Try {
-      LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
-        .get("project.name")
-        .flatMap(_.headOption)
-        .map(_.trim)
-        .filter(_.nonEmpty)
+      val values = LauncherConfigParser.parse(project, Files.readString(project, StandardCharsets.UTF_8))
+      val namespace = values.get("project.namespace").flatMap(_.headOption).map(_.trim).filter(_.nonEmpty)
+      val id = values.get("project.id").flatMap(_.headOption).map(_.trim).filter(_.nonEmpty)
+      namespace
+        .flatMap(value => id.map(localid => s"${value.split("\\.").last}-${_kebab_case(localid)}"))
+        .orElse(values.get("project.name").flatMap(_.headOption).map(_.trim).filter(_.nonEmpty))
     }.toOption.flatten
   }
+
+  private def _kebab_case(value: String): String =
+    value.indices.map { index =>
+      val current = value.charAt(index)
+      val boundary = index > 0 && current.isUpper && (
+        value.charAt(index - 1).isLower || value.charAt(index - 1).isDigit ||
+          (index > 1 && value.charAt(index - 1).isUpper && value.charAt(index - 2).isUpper && index + 1 < value.length && value.charAt(index + 1).isLower)
+      )
+      s"${if (boundary) "-" else ""}${current.toLower}"
+    }.mkString
 
   private def _is_control_center_project(directory: java.nio.file.Path): Boolean = {
     val project = directory.resolve("project.yaml")

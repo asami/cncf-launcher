@@ -9,7 +9,7 @@ import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 /*
  * @since   Jul. 18, 2026
  *  version Jul. 24, 2026
- * @version Aug. 5, 2026
+ * @version Aug. 14, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfTextusControlCenterRegistrationConfig(
@@ -101,10 +101,7 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
         _warning("credential is unavailable")
         CncfTextusControlCenterRegistrationSession.noop
       case Some(value) if value.trim.nonEmpty =>
-        if (config.baseUrl.trim.nonEmpty)
-          _start_active(config, report, value)
-        else
-          _start_pending(config, report, value)
+        _start_pending(config, report, value)
       case Some(_) =>
         _warning("credential is unavailable")
         CncfTextusControlCenterRegistrationSession.noop
@@ -114,27 +111,38 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
   private def _start_active(
     config: CncfTextusControlCenterRegistrationConfig,
     report: CncfTextusControlCenterRegistrationReport,
-    token: String
+    token: String,
+    snapshot: RegistrationSnapshot
   ): CncfTextusControlCenterRegistrationSession = {
-    val registered = new AtomicBoolean(_request_best_effort(config, report, token, "register-subsystem", "starting"))
+    val registered = new AtomicBoolean(_request_best_effort(config, report, token, snapshot, "register-subsystem", "starting"))
     val executor = Executors.newSingleThreadScheduledExecutor(_daemon_thread_factory)
     val task = new Runnable {
       def run(): Unit =
         if (registered.get) {
-          _request_best_effort(config, report, token, "heartbeat-subsystem", "running")
+          _request_best_effort(config, report, token, snapshot, "heartbeat-subsystem", "running")
           ()
         } else {
-          registered.set(_request_best_effort(config, report, token, "register-subsystem", "starting"))
+          registered.set(_request_best_effort(config, report, token, snapshot, "register-subsystem", "starting"))
         }
     }
     executor.scheduleAtFixedRate(task, config.heartbeatInterval.toMillis, config.heartbeatInterval.toMillis, TimeUnit.MILLISECONDS)
     ActiveCncfTextusControlCenterRegistrationSession(
       executor,
-      () => if (registered.get) _request_best_effort(config, report, token, "deregister-subsystem", "stopped")
+      () => if (registered.get) _request_best_effort(config, report, token, snapshot, "deregister-subsystem", "stopped")
     )
   }
 
   private def _start_pending(
+    config: CncfTextusControlCenterRegistrationConfig,
+    report: CncfTextusControlCenterRegistrationReport,
+    token: String
+  ): CncfTextusControlCenterRegistrationSession =
+    _snapshot(config) match {
+      case Some(snapshot) => _start_active(config, report, token, snapshot)
+      case None => _wait_for_snapshot(config, report, token)
+    }
+
+  private def _wait_for_snapshot(
     config: CncfTextusControlCenterRegistrationConfig,
     report: CncfTextusControlCenterRegistrationReport,
     token: String
@@ -145,9 +153,9 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
     val active = new AtomicReference[CncfTextusControlCenterRegistrationSession](CncfTextusControlCenterRegistrationSession.noop)
     val task = new Runnable {
       def run(): Unit =
-        sys.props.get(_bound_base_url_property_key).map(_.trim).filter(_.nonEmpty).foreach { baseurl =>
+        _snapshot(config).foreach { snapshot =>
           if (!closed.get && activated.compareAndSet(false, true)) {
-            val session = _start_active(config.copy(baseUrl = baseurl), report, token)
+            val session = _start_active(config, report, token, snapshot)
             active.set(session)
             executor.shutdown()
             if (closed.get) session.close()
@@ -168,11 +176,12 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
     config: CncfTextusControlCenterRegistrationConfig,
     report: CncfTextusControlCenterRegistrationReport,
     token: String,
+    snapshot: RegistrationSnapshot,
     operation: String,
     state: String
   ): Boolean =
     try {
-      val status = _request(config, report, token, operation, state)
+      val status = _request(config, report, token, snapshot, operation, state)
       if (status < 200 || status >= 300) {
         _warning(s"$operation request to ${_operation_endpoint(config, operation)} returned HTTP $status")
         false
@@ -189,12 +198,13 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
     config: CncfTextusControlCenterRegistrationConfig,
     report: CncfTextusControlCenterRegistrationReport,
     token: String,
+    snapshot: RegistrationSnapshot,
     operation: String,
     state: String
   ): Int = {
     val endpoint = URI.create(_operation_endpoint(config, operation))
     val timeout = config.timeout.toMillis.min(Int.MaxValue.toLong).toInt
-    val query = _parameters(config, report, state).map { case (key, value) => s"${_encode(key)}=${_encode(value)}" }.mkString("?", "&", "")
+    val query = _parameters(config, report, snapshot, state).map { case (key, value) => s"${_encode(key)}=${_encode(value)}" }.mkString("?", "&", "")
     val connection = URI.create(endpoint.toString + query).toURL.openConnection().asInstanceOf[HttpURLConnection]
     try {
       connection.setRequestMethod("GET")
@@ -210,6 +220,7 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
   private def _parameters(
     config: CncfTextusControlCenterRegistrationConfig,
     report: CncfTextusControlCenterRegistrationReport,
+    snapshot: RegistrationSnapshot,
     state: String
   ): Vector[(String, String)] =
     Vector(
@@ -219,11 +230,60 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
       "target" -> report.target,
       "executionMode" -> report.executionMode,
       "runtimeVersion" -> report.runtimeVersion,
-      "baseUrl" -> config.baseUrl,
+      "baseUrl" -> snapshot.baseUrl,
       "hostLabel" -> config.hostLabel,
       "startedAt" -> report.startedAt.toString,
       "launcherState" -> state
-    ) ++ report.artifactId.map("artifactId" -> _).toVector ++ report.developmentDirectory.map("developmentDirectory" -> _).toVector ++ report.subsystemName.map("subsystemName" -> _).toVector ++ report.subsystemVersion.map("subsystemVersion" -> _).toVector
+    ) ++ snapshot.applicationUrl.map("applicationUrl" -> _).toVector ++ report.artifactId.map("artifactId" -> _).toVector ++ report.developmentDirectory.map("developmentDirectory" -> _).toVector ++ report.subsystemName.map("subsystemName" -> _).toVector ++ report.subsystemVersion.map("subsystemVersion" -> _).toVector
+
+  private def _snapshot(config: CncfTextusControlCenterRegistrationConfig): Option[RegistrationSnapshot] =
+    sys.props.get(_bound_snapshot_property_key).flatMap(_parse_bound_snapshot).flatMap { bound =>
+      val publicbase = Option(config.baseUrl).map(_.trim).filter(_.nonEmpty).getOrElse(bound.baseUrl)
+      _valid_public_base(publicbase).map { baseurl =>
+        val applicationurl = bound.applicationPath.flatMap(path => _application_url(baseurl, path))
+        RegistrationSnapshot(baseurl, applicationurl)
+      }
+    }
+
+  private def _parse_bound_snapshot(value: String): Option[BoundServerSnapshot] =
+    value.split("\\n", -1).toVector match {
+      case Vector("v1", baseurl, "") =>
+        _valid_public_base(baseurl).map(value => BoundServerSnapshot(value, None))
+      case Vector("v1", baseurl, path) =>
+        for {
+          validbase <- _valid_public_base(baseurl)
+          validpath <- _valid_application_path(path)
+        } yield BoundServerSnapshot(validbase, Some(validpath))
+      case _ => None
+    }
+
+  private def _valid_public_base(value: String): Option[String] =
+    scala.util.Try(URI.create(value)).toOption.filter { uri =>
+      uri.isAbsolute &&
+        Option(uri.getScheme).exists(scheme => Set("http", "https").contains(scheme.toLowerCase)) &&
+        Option(uri.getHost).exists(_.nonEmpty) &&
+        uri.getUserInfo == null && uri.getQuery == null && uri.getFragment == null &&
+        Set("", "/").contains(Option(uri.getPath).getOrElse(""))
+    }.map(_ => value.stripSuffix("/"))
+
+  private def _application_url(baseurl: String, path: String): Option[String] =
+    _valid_application_path(path).map { validpath =>
+      s"${baseurl.stripSuffix("/")}$validpath"
+    }
+
+  private def _valid_application_path(path: String): Option[String] =
+    Option.when(
+      path == "/web" ||
+        (path.startsWith("/web/") &&
+          path != "/web/system" &&
+          !path.startsWith("/web/system/") &&
+          !path.contains("//") &&
+          !path.contains("?") &&
+          !path.contains("#") &&
+          !path.split("/", -1).drop(1).exists(segment => segment.isEmpty || segment == "." || segment == ".."))
+    ) {
+      path
+    }
 
   private def _operation_endpoint(
     config: CncfTextusControlCenterRegistrationConfig,
@@ -245,8 +305,18 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
   private def _warning(message: String): Unit =
     Console.err.println(s"warning: Textus Control Center registration $message; continuing server startup.")
 
-  private val _bound_base_url_property_key = "textus.server.bound-base-url"
+  private val _bound_snapshot_property_key = "textus.server.bound-snapshot"
 }
+
+private final case class BoundServerSnapshot(
+  baseUrl: String,
+  applicationPath: Option[String]
+)
+
+private final case class RegistrationSnapshot(
+  baseUrl: String,
+  applicationUrl: Option[String]
+)
 
 private final case class ActiveCncfTextusControlCenterRegistrationSession(
   executor: ScheduledExecutorService,
