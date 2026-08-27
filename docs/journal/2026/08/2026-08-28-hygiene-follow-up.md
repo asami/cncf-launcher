@@ -2,7 +2,8 @@
 
 ## HYG-CNCF-LAUNCHER-SOURCE-SIZE
 
-- Status: `OPEN`
+- Status: `CLOSED`
+- Resolution: Extracted development-server/configuration and Control Center registration into `CncfLauncherServerSupport`; split the canonical executable specification into command/repository, lifecycle, configuration/runtime, and development/packaging suites while preserving `CncfLauncherSpec` selection. Required validation boundary: `testOnly cncf.launcher.CncfLauncherSpec`, then affected accumulator `test`.
 - Discovered: 2026-08-28, `cncf-validated-commit` preparation
 - Repository: `cncf-launcher`
 - Location: `src/main/scala/cncf/launcher/CncfLauncher.scala`
@@ -15,7 +16,8 @@
 
 ## HYG-CNCF-LAUNCHER-SPEC-SIZE
 
-- Status: `OPEN`
+- Status: `CLOSED`
+- Resolution: Extracted development-server/configuration and Control Center registration into `CncfLauncherServerSupport`; split the canonical executable specification into command/repository, lifecycle, configuration/runtime, and development/packaging suites while preserving `CncfLauncherSpec` selection. Required validation boundary: `testOnly cncf.launcher.CncfLauncherSpec`, then affected accumulator `test`.
 - Discovered: 2026-08-28, `cncf-validated-commit` preparation
 - Repository: `cncf-launcher`
 - Location: `src/test/scala/cncf/launcher/CncfLauncherSpec.scala`
