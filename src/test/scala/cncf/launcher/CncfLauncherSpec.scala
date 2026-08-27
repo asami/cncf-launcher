@@ -20,7 +20,7 @@ import LifecycleSupervisorStateStore.given
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug. 27, 2026
+ * @version Aug. 28, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -1884,6 +1884,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
   def standaloneControlCenterLocatorLifecycle(): Unit = _with_temp_paths { paths =>
     Given("a machine-local standalone Control Center locator and owner-only launcher token")
+    _write(paths.cwd.resolve("project.yaml"),
+      """project:
+        |  namespace: org.simplemodeling.textus
+        |  id: ControlCenter
+        |  name: textus-control-center
+        |  kind: car
+        |""".stripMargin)
     val root = paths.cncfHome.resolve("textus-control-center")
     val token = root.resolve("credentials").resolve("launcher-registration.token")
     _write(token, "standalone-token\n")
@@ -1908,13 +1915,12 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val currentprojectcode = launcher.run(Vector("server", "--textus.server.port=18014"))
     val targetfirstcode = launcher.run(Vector("textus-registration:0.1.0", "server"))
 
-    Then("the locator credential is used for both lifecycle sessions")
+    Then("the intrinsic Control Center does not self-register while an ordinary target uses the locator credential")
     _assert_equals(currentprojectcode, 0)
     _assert_equals(targetfirstcode, 0)
-    _assert_equals(reporter.starts.size, 2)
-    reporter.starts.map(_._2) shouldBe Vector(Some("standalone-token"), Some("standalone-token"))
-    reporter.configs.head.baseUrl shouldBe "http://127.0.0.1:18014"
-    _assert_equals(reporter.closes, 2)
+    _assert_equals(reporter.starts.size, 1)
+    reporter.starts.map(_._2) shouldBe Vector(Some("standalone-token"))
+    _assert_equals(reporter.closes, 1)
 
     When("the locator advertises the legacy inventory route")
     _write(locator, Files.readString(locator).replace(
@@ -1937,7 +1943,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     Then("the invalid locator is ignored without changing server startup")
     _assert_equals(invalidlocatorcode, 0)
-    _assert_equals(reporter.starts.size, 2)
+    _assert_equals(reporter.starts.size, 1)
 
     When("an explicit registration disable is configured")
     _write(paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
@@ -1950,13 +1956,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     Then("the machine locator is not used")
     _assert_equals(disabledcode, 0)
-    _assert_equals(reporter.starts.size, 2)
+    _assert_equals(reporter.starts.size, 1)
   }
 
   def textusControlCenterRegistrationHttpLifecycle(): Unit = {
     Given("a reachable Textus Control Center automatic REST endpoint")
     val requests = new ConcurrentLinkedQueue[(String, String)]()
     val rejectnextheartbeat = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val rejectnextregistration = new java.util.concurrent.atomic.AtomicBoolean(false)
     val baseurlpropertykey = "textus.server.bound-base-url"
     val applicationpathpropertykey = "textus.server.bound-application-path"
     val snapshotpropertykey = "textus.server.bound-snapshot"
@@ -1971,7 +1978,8 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         val path = exchange.getRequestURI.toString
         requests.add(path -> exchange.getRequestHeaders.getFirst("Authorization"))
         val status =
-          if (path.contains("heartbeat-subsystem") && rejectnextheartbeat.compareAndSet(true, false)) 503
+          if (path.contains("register-subsystem") && rejectnextregistration.compareAndSet(true, false)) 503
+          else if (path.contains("heartbeat-subsystem") && rejectnextheartbeat.compareAndSet(true, false)) 503
           else 204
         exchange.sendResponseHeaders(status, -1)
         exchange.close()
@@ -2007,9 +2015,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       session.close()
       session.close()
 
-      Then("it sends one register and one deregister operation with the configured bearer credential")
-      _assert_equals(requests.size, 2)
+      Then("it sends one register, an immediate running heartbeat, and one deregister operation with the configured bearer credential")
+      _assert_equals(requests.size, 3)
       requests.iterator.asScala.map(_._1).exists(_.contains("register-subsystem")) shouldBe true
+      requests.iterator.asScala.map(_._1).exists(_.contains("heartbeat-subsystem")) shouldBe true
       requests.iterator.asScala.map(_._1).exists(_.contains("deregister-subsystem")) shouldBe true
       requests.iterator.asScala.forall(_._2 == "Bearer test-token") shouldBe true
       requests.iterator.asScala.forall { case (path, _) => path.contains("instanceId=cncf-registration-http-spec") } shouldBe true
@@ -2027,7 +2036,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       explicitpathsession.close()
 
       Then("the registration preserves its public authority while composing the explicit application path")
-      _assert_equals(requests.size, 2)
+      _assert_equals(requests.size, 3)
       requests.iterator.asScala.forall(_._1.contains("baseUrl=https%3A%2F%2Fsubsystem.example.test")) shouldBe true
       requests.iterator.asScala.forall(_._1.contains("applicationUrl=https%3A%2F%2Fsubsystem.example.test%2Fweb%2Fportal")) shouldBe true
 
@@ -2041,7 +2050,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       noappsession.close()
 
       Then("the public registration base is retained while applicationUrl is omitted")
-      _assert_equals(requests.size, 2)
+      _assert_equals(requests.size, 3)
       requests.iterator.asScala.forall(_._1.contains("baseUrl=https%3A%2F%2Fsubsystem.example.test")) shouldBe true
       requests.iterator.asScala.forall { case (path, _) => !path.contains("applicationUrl=") } shouldBe true
 
@@ -2084,11 +2093,11 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         Thread.sleep(10L)
       dynamicsession.close()
       val closedeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2)
-      while (requests.size < 2 && System.nanoTime() < closedeadline)
+      while (requests.size < 3 && System.nanoTime() < closedeadline)
         Thread.sleep(10L)
 
       Then("registration uses the bound endpoint and exact encoded application endpoint rather than guessing either")
-      _assert_equals(requests.size, 2)
+      _assert_equals(requests.size, 3)
       requests.iterator.asScala.forall(_._1.contains("baseUrl=http%3A%2F%2F127.0.0.1%3A38000")) shouldBe true
       requests.iterator.asScala.forall(_._1.contains("applicationUrl=http%3A%2F%2F127.0.0.1%3A38000%2Fweb")) shouldBe true
       sys.props.remove(applicationpathpropertykey)
@@ -2106,10 +2115,36 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       interleavingsession.close()
 
       Then("register and deregister retain only atomic generation A")
-      _assert_equals(requests.size, 2)
+      _assert_equals(requests.size, 3)
       requests.iterator.asScala.forall(_._1.contains("baseUrl=http%3A%2F%2F127.0.0.1%3A38010")) shouldBe true
       requests.iterator.asScala.forall(_._1.contains("applicationUrl=http%3A%2F%2F127.0.0.1%3A38010%2Fweb%2Fatomic")) shouldBe true
       requests.iterator.asScala.forall(path => !path._1.contains("38011") && !path._1.contains("legacy")) shouldBe true
+
+      Given("an initial registration attempt that is temporarily unavailable")
+      requests.clear()
+      rejectnextregistration.set(true)
+
+      When("the scheduled registration retry reaches Control Center")
+      val retrysession = CncfTextusControlCenterRegistrationReporter.System.start(
+        config.copy(heartbeatInterval = java.time.Duration.ofMillis(20)),
+        report,
+        Some("test-token")
+      )
+      val retrydeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2)
+      while ((requests.iterator.asScala.count(_._1.contains("register-subsystem")) < 2 || requests.iterator.asScala.count(_._1.contains("heartbeat-subsystem")) < 1) && System.nanoTime() < retrydeadline)
+        Thread.sleep(10L)
+      retrysession.close()
+      val retryrequests = requests.iterator.asScala.map(_._1).toVector
+
+      Then("a successful retry immediately publishes running before later heartbeat intervals")
+      retryrequests.take(3).map { path =>
+        if (path.contains("register-subsystem")) "register"
+        else if (path.contains("heartbeat-subsystem")) "heartbeat"
+        else "other"
+      } shouldBe Vector("register", "register", "heartbeat")
+      retryrequests.count(_.contains("/register-subsystem?")) shouldBe 2
+      retryrequests.count(_.contains("/heartbeat-subsystem?")) should be >= 1
+      retryrequests.count(_.contains("/deregister-subsystem?")) shouldBe 1
 
       Given("a registered server whose heartbeat has one transient communication failure")
       requests.clear()

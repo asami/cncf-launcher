@@ -11,7 +11,7 @@ import io.circe.syntax.*
  * @since   May. 17, 2026
  *  version May. 27, 2026
  *  version Jul. 28, 2026
- * @version Aug. 27, 2026
+ * @version Aug. 28, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -626,6 +626,9 @@ final class CncfLauncher(
     config: LauncherConfig,
     report: CncfTextusControlCenterRegistrationReport
   ): CncfTextusControlCenterRegistrationSession = {
+    if (report.artifactId.contains("textus-control-center")) {
+      CncfTextusControlCenterRegistrationSession.noop
+    } else {
       val registration = config.textusControlCenterRegistration.map(value => value -> environment.get(value.tokenEnv)).orElse {
         Option.when(!config.textusControlCenterRegistrationEnabled.contains(false))(
           CncfTextusControlCenterStandaloneLocator.resolve(paths).map { value =>
@@ -649,6 +652,7 @@ final class CncfLauncher(
           }
         case None => CncfTextusControlCenterRegistrationSession.noop
       }
+    }
     }
 
   private def _registration_instance_id(args: Vector[String]): Option[String] =

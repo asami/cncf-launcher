@@ -9,7 +9,7 @@ import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 /*
  * @since   Jul. 18, 2026
  *  version Jul. 24, 2026
- * @version Aug. 14, 2026
+ * @version Aug. 28, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfTextusControlCenterRegistrationConfig(
@@ -115,6 +115,8 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
     snapshot: RegistrationSnapshot
   ): CncfTextusControlCenterRegistrationSession = {
     val registered = new AtomicBoolean(_request_best_effort(config, report, token, snapshot, "register-subsystem", "starting"))
+    if (registered.get)
+      _request_best_effort(config, report, token, snapshot, "heartbeat-subsystem", "running")
     val executor = Executors.newSingleThreadScheduledExecutor(_daemon_thread_factory)
     val task = new Runnable {
       def run(): Unit =
@@ -122,7 +124,10 @@ private final class SystemCncfTextusControlCenterRegistrationReporter extends Cn
           _request_best_effort(config, report, token, snapshot, "heartbeat-subsystem", "running")
           ()
         } else {
-          registered.set(_request_best_effort(config, report, token, snapshot, "register-subsystem", "starting"))
+          val acquired = _request_best_effort(config, report, token, snapshot, "register-subsystem", "starting")
+          registered.set(acquired)
+          if (acquired)
+            _request_best_effort(config, report, token, snapshot, "heartbeat-subsystem", "running")
         }
     }
     executor.scheduleAtFixedRate(task, config.heartbeatInterval.toMillis, config.heartbeatInterval.toMillis, TimeUnit.MILLISECONDS)
