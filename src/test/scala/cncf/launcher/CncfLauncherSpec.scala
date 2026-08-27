@@ -20,7 +20,7 @@ import LifecycleSupervisorStateStore.given
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug. 14, 2026
+ * @version Aug. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -63,6 +63,8 @@ object CncfLauncherSpec {
     spec.launcherHomeEnvironmentPropagatesToRuntime()
     spec.canonicalDevelopmentTargetsUseConfiguredRuntime()
     spec.canonicalDevelopmentTargetSelectsCompatibleInstalledRuntime()
+    spec.canonicalDevelopmentTargetRefreshesStaleRuntimeCatalog()
+    spec.canonicalDevelopmentTargetRetainsStaleRuntimeCatalogWhenRefreshFails()
     spec.canonicalDevelopmentTargetUsesExplicitRuntimeVersion()
     spec.canonicalDevelopmentTargetUsesExplicitDevelopmentRuntime()
     spec.canonicalServerRejectsRuntimeCheckoutTarget()
@@ -566,6 +568,14 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       "canonical target and runtime boundary" which {
         "CAR development targets use the configured CNCF development runtime" in {
           canonicalDevelopmentTargetsUseConfiguredRuntime()
+        }
+
+        "a stale catalog is refreshed when the target requires a newer runtime" in {
+          canonicalDevelopmentTargetRefreshesStaleRuntimeCatalog()
+        }
+
+        "a stale catalog remains usable when its refresh source is unavailable" in {
+          canonicalDevelopmentTargetRetainsStaleRuntimeCatalogWhenRefreshFails()
         }
 
         "an explicit runtime version overrides a configured development runtime" in {
@@ -2423,6 +2433,63 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
     Then("the compatible installed SNAPSHOT is selected before runtime invocation")
     resolver.resolvedClasspaths.last shouldBe "0.5.2-SNAPSHOT"
+  }
+
+  def canonicalDevelopmentTargetRefreshesStaleRuntimeCatalog(): Unit = _with_temp_paths { paths =>
+    Given("a current CAR requiring a version absent from its readable cached catalog")
+    val remotecatalog = paths.cwd.resolve("runtime-catalog.yaml")
+    val remoteversion =
+      """  - version: 0.5.2
+        |    channel: stable
+        |    status: active
+        |    scalaBinaryVersion: "3"
+        |    module: org.goldenport:goldenport-cncf_3:0.5.2
+        |    publishedAt: 2026-08-01T00:00:00Z
+        |""".stripMargin
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.5.2", Vector("0.5.2")))
+    _write(paths.runtimeCatalog, _catalog_text)
+    _write(remotecatalog, _catalog_text.replace("recommended: 0.2.0", "recommended: 0.5.2").replace("latestStable: 0.2.0", "latestStable: 0.5.2") + remoteversion)
+    _write(
+      paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: $remotecatalog
+         |""".stripMargin
+    )
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    When("the current-project server command selects its runtime")
+    launcher.run(Vector(".", "server")) shouldBe 0
+
+    Then("the compatible remote version is selected and persisted in the cache")
+    resolver.resolvedClasspaths.last shouldBe "0.5.2"
+    RuntimeCatalog.parse(Files.readString(paths.runtimeCatalog)).versions.map(_.version) should contain("0.5.2")
+  }
+
+  def canonicalDevelopmentTargetRetainsStaleRuntimeCatalogWhenRefreshFails(): Unit = _with_temp_paths { paths =>
+    Given("a current CAR requiring a version absent from its readable cache and an unavailable refresh source")
+    _write(paths.cwd.resolve("project.yaml"), _project_yaml("0.5.2", Vector("0.5.2")))
+    _write(paths.runtimeCatalog, _catalog_text)
+    _write(
+      paths.cwd.resolve(".cncf").resolve("launcher.yaml"),
+      s"""runtime:
+         |  catalog:
+         |    url: ${paths.cwd.resolve("missing-runtime-catalog.yaml")}
+         |  cncf:
+         |    no-compatible-policy: newest
+         |""".stripMargin
+    )
+    val resolver = FakeResolver()
+    val launcher = new CncfLauncher(paths, resolver, FakeInvoker())
+
+    When("the current-project server command permits the newest cached runtime after refresh fails")
+    launcher.run(Vector(".", "server")) shouldBe 0
+
+    Then("the cached catalog remains selectable and its contents are preserved")
+    resolver.resolvedClasspaths.last shouldBe "0.3.0-SNAPSHOT"
+    RuntimeCatalog.parse(Files.readString(paths.runtimeCatalog)).versions.map(_.version) shouldBe
+      Vector("0.1.0", "0.2.0", "0.3.0-SNAPSHOT")
   }
 
   def canonicalDevelopmentTargetUsesExplicitRuntimeVersion(): Unit = _with_temp_paths { paths =>

@@ -11,7 +11,7 @@ import io.circe.syntax.*
  * @since   May. 17, 2026
  *  version May. 27, 2026
  *  version Jul. 28, 2026
- * @version Aug. 14, 2026
+ * @version Aug. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -447,7 +447,7 @@ final class CncfLauncher(
               requested = command.runtimeVersion,
               stored = store.current(None, config),
               requirements = runtimerequirements,
-              catalog = RuntimeCatalogStore(paths).loadForSelection(config),
+              catalog = RuntimeCatalogStore(paths).loadForSelection(config, runtimerequirements),
               selectionPolicy = config.runtimeSelectionPolicy.getOrElse(RuntimeSelectionPolicy.CurrentCompatible),
               policy = config.runtimeNoCompatiblePolicy.getOrElse(RuntimeNoCompatiblePolicy.Error)
             )
@@ -806,7 +806,7 @@ final class CncfLauncher(
     val rawcontext = devsupport.context(effectiveoptions, baseconfig, store)
     val catalog = rawcontext.runtimeDevDir match {
       case Some(dir) => RuntimeCatalogStore.loadRuntimeDevelopmentCatalog(dir)
-      case None => basecatalog
+      case None => RuntimeCatalogStore(effectivepaths).loadForSelection(config, rawcontext.runtimeRequirements)
     }
     val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
     val runtimedevdir =
@@ -883,7 +883,7 @@ final class CncfLauncher(
     val rawcontext = devsupport.context(effectiveoptions, baseconfig, store)
     val catalog =
       rawcontext.runtimeDevDir.flatMap(RuntimeCatalogStore.loadRuntimeDevelopmentCatalog)
-        .orElse(basecatalog)
+        .orElse(RuntimeCatalogStore(effectivepaths).loadForSelection(config, rawcontext.runtimeRequirements))
     val effectiveconfig = catalog.map(config.withCatalog).getOrElse(config)
     val selectionpolicy = effectiveoptions.runtimeSelectionPolicy.
       orElse(effectiveconfig.runtimeSelectionPolicy).
