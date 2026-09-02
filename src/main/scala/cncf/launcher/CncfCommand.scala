@@ -32,6 +32,7 @@ object CncfCommand {
     args: Vector[String],
     runtimeVersion: Option[String],
     runtimeDevDir: Option[String],
+    runtimeBundleDir: Option[String] = None,
     developmentTarget: Option[ExecuteDevelopmentTarget] = None
   ) extends CncfCommand
 
@@ -162,16 +163,29 @@ object CncfCommandParser {
     } else if (args.isEmpty || args == Vector("launcher", "help") || args == Vector("launcher", "--help")) {
       CncfCommand.LauncherHelp
     } else {
-      val (runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir, rest) = _take_global_runtime_options(args)
+      val (runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir, runtimebundledir, rest) = _take_global_runtime_options(args)
+      if (runtimebundledir.nonEmpty && (runtimeversion.nonEmpty || selectionpolicy.nonEmpty || nocompatiblepolicy.nonEmpty || runtimedevdir.nonEmpty))
+        throw CncfException("--runtime-bundle-dir cannot be combined with other runtime selection options")
       rest match {
+        case Vector("--version") | Vector("version") if runtimebundledir.nonEmpty =>
+          throw CncfException("--runtime-bundle-dir is supported only for direct execute commands")
         case Vector("--version") | Vector("version") =>
           CncfCommand.Runtime.Version(runtimeversion, runtimedevdir)
         case _ =>
           rest.headOption match {
+            case Some("install-cli") if runtimebundledir.nonEmpty =>
+              throw CncfException("--runtime-bundle-dir is supported only for direct execute commands")
             case Some("install-cli") =>
               _parse_install_cli(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
+            case Some("dev") if runtimebundledir.nonEmpty =>
+              throw CncfException("--runtime-bundle-dir is supported only for direct execute commands")
             case Some("dev") =>
               _parse_dev(rest.tail, runtimeversion, selectionpolicy, nocompatiblepolicy, runtimedevdir)
+            case Some(_) if runtimebundledir.nonEmpty && _is_runtime_execute(rest) =>
+              val (executeargs, developmenttarget) = _runtime_execute(rest)
+              CncfCommand.Execute(executeargs, runtimeversion, runtimedevdir, runtimebundledir, developmenttarget)
+            case Some(_) if runtimebundledir.nonEmpty =>
+              throw CncfException("--runtime-bundle-dir is supported only for direct execute commands")
             case Some("runtime") =>
               _parse_runtime(rest.tail)
             case Some("repository") =>
@@ -180,9 +194,11 @@ object CncfCommandParser {
               _parse_launcher(rest.tail)
             case Some(_) if _is_runtime_execute(rest) =>
               val (executeargs, developmenttarget) = _runtime_execute(rest)
-              CncfCommand.Execute(executeargs, runtimeversion, runtimedevdir, developmenttarget)
+              CncfCommand.Execute(executeargs, runtimeversion, runtimedevdir, None, developmenttarget)
             case Some(other) =>
               throw CncfException(s"unknown cncf command: $other")
+            case None if runtimebundledir.nonEmpty =>
+              throw CncfException("--runtime-bundle-dir is supported only for direct execute commands")
             case None =>
               CncfCommand.LauncherHelp
           }
@@ -366,12 +382,13 @@ object CncfCommandParser {
     )
   }
 
-  private def _take_global_runtime_options(args: Vector[String]): (Option[String], Option[RuntimeSelectionPolicy], Option[RuntimeNoCompatiblePolicy], Option[String], Vector[String]) = {
+  private def _take_global_runtime_options(args: Vector[String]): (Option[String], Option[RuntimeSelectionPolicy], Option[RuntimeNoCompatiblePolicy], Option[String], Option[String], Vector[String]) = {
     val out = Vector.newBuilder[String]
     var runtime: Option[String] = None
     var selectionpolicy: Option[RuntimeSelectionPolicy] = None
     var nocompatiblepolicy: Option[RuntimeNoCompatiblePolicy] = None
     var runtimedevdir: Option[String] = None
+    var runtimebundledir: Option[String] = None
     var i = 0
     while (i < args.length) {
       args(i) match {
@@ -410,12 +427,20 @@ object CncfCommandParser {
         case x if x.startsWith("--cncf-dev-dir=") =>
           runtimedevdir = Some(x.stripPrefix("--cncf-dev-dir="))
           i += 1
+        case "--runtime-bundle-dir" =>
+          if (i + 1 >= args.length)
+            throw CncfException("--runtime-bundle-dir requires a directory")
+          runtimebundledir = Some(args(i + 1))
+          i += 2
+        case x if x.startsWith("--runtime-bundle-dir=") =>
+          runtimebundledir = Some(x.stripPrefix("--runtime-bundle-dir="))
+          i += 1
         case x =>
           out += x
           i += 1
       }
     }
-    (runtime, selectionpolicy, nocompatiblepolicy, runtimedevdir, out.result())
+    (runtime, selectionpolicy, nocompatiblepolicy, runtimedevdir, runtimebundledir, out.result())
   }
 
   private def _is_runtime_execute(args: Vector[String]): Boolean =
@@ -775,12 +800,12 @@ object CncfCommandParser {
       |  cncf launcher lifecycle submit --request-id <id> --idempotency-key <key> --artifact-id <artifact> --action <start|stop|restart> --operator-subject-id <subject> --deadline-at <instant>
       |  cncf launcher lifecycle lookup <request-id>
       |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] install-cli <command-base-name> [--project-dev <dir>] [--component-dev-dir <dir>...] [--operation-prefix <component.service>] [--file-param <name>...] [--bin-dir <dir>] [--overwrite]
-      |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> command <operation> [args...]
-      |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> server [args...]
-      |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] <target> client [args...]
-      |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] command <operation> [args...]
-      |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] server [args...]
-      |  cncf [--runtime <version>] [--runtime-dev-dir <dir>] client [args...]
+      |  cncf [--runtime <version>|--runtime-dev-dir <dir>|--runtime-bundle-dir <dir>] <target> command <operation> [args...]
+      |  cncf [--runtime <version>|--runtime-dev-dir <dir>|--runtime-bundle-dir <dir>] <target> server [args...]
+      |  cncf [--runtime <version>|--runtime-dev-dir <dir>|--runtime-bundle-dir <dir>] <target> client [args...]
+      |  cncf [--runtime <version>|--runtime-dev-dir <dir>|--runtime-bundle-dir <dir>] command <operation> [args...]
+      |  cncf [--runtime <version>|--runtime-dev-dir <dir>|--runtime-bundle-dir <dir>] server [args...]
+      |  cncf [--runtime <version>|--runtime-dev-dir <dir>|--runtime-bundle-dir <dir>] client [args...]
       |  cncf runtime current
       |  cncf runtime list
       |  cncf runtime local list
@@ -805,6 +830,7 @@ object CncfCommandParser {
       |  --runtime-selection=current-compatible|tested-latest|latest-compatible|newest-compatible selects the compatible runtime preference.
       |  --runtime-no-compatible=error|newest controls the fallback when no compatible runtime exists.
       |  --runtime-dev-dir <dir> uses a local CNCF runtime checkout for execute and installed development commands.
+      |  --runtime-bundle-dir <dir> uses a sealed prebuilt runtime bundle for one direct execute command; it cannot be combined with other runtime selection options and is not accepted by install-cli.
       |  install-cli defers runtime selection to launcher configuration unless an explicit runtime option is supplied.
       |  An explicit --runtime or --runtime-dev-dir is pinned into the installed development command and validated against component requirements.
       |  cncf dev is deprecated; use target-first command, server, or client syntax, or install-cli for a fixed development command.

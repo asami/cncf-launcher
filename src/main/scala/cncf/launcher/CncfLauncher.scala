@@ -432,11 +432,20 @@ final class CncfLauncher(
       .map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
     val runtimerequirements = developmenttarget.toVector
       .flatMap(target => devsupport.runtimeRequirements(target, dependencyprojects))
+    val runtimebundle = command.runtimeBundleDir.map { dir =>
+      CncfRuntimeBundle.read(paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
+    }
     val runtimedevdir =
-      command.runtimeDevDir
-        .orElse(Option.when(command.runtimeVersion.isEmpty)(config.runtimeDevDir).flatten)
-        .map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
-    val runtimeversion = runtimedevdir match {
+      Option.when(runtimebundle.isEmpty)(
+        command.runtimeDevDir
+          .orElse(Option.when(command.runtimeVersion.isEmpty)(config.runtimeDevDir).flatten)
+          .map(dir => paths.cwd.resolve(dir).normalize.toAbsolutePath.normalize)
+      ).flatten
+    val runtimeversion = runtimebundle match {
+      case Some(bundle) =>
+        _validate_runtime_version(bundle.version, runtimerequirements)
+        bundle.version
+      case None => runtimedevdir match {
       case Some(dir) =>
         _validate_development_runtime(dir, runtimerequirements)
         _development_runtime_version(dir)
@@ -453,15 +462,16 @@ final class CncfLauncher(
               selectionPolicy = config.runtimeSelectionPolicy.getOrElse(RuntimeSelectionPolicy.CurrentCompatible),
               policy = config.runtimeNoCompatiblePolicy.getOrElse(RuntimeNoCompatiblePolicy.Error)
             )
-          }
+        }
         runtimeresolver.resolveVersion(selected, config, paths)
+      }
     }
-    val classpath = runtimedevdir match {
+    val classpath = runtimebundle.map(_.classpath).getOrElse(runtimedevdir match {
       case Some(dir) =>
         devsupport.cncfRuntimeClasspath(dir)
       case None =>
         runtimeresolver.resolve(runtimeversion, config, paths)
-    }
+    })
     val developmentargs = _server_support._development_server_args(command, developmenttarget)
     val effectivecommand = command.copy(args = _server_support._configured_component_development_args(developmentargs, config))
     val report = _server_support._server_report(command, runtimeversion)
@@ -579,6 +589,13 @@ final class CncfLauncher(
     requirements: Vector[RuntimeRequirement]
   ): Unit = {
     val version = _development_runtime_version(runtimeproject)
+    _validate_runtime_version(version, requirements)
+  }
+
+  private def _validate_runtime_version(
+    version: String,
+    requirements: Vector[RuntimeRequirement]
+  ): Unit = {
     val rejected = requirements.filterNot(_.accepts(version))
     if (rejected.nonEmpty) {
       val sources = rejected.map(_.source).distinct.sorted.mkString(", ")
