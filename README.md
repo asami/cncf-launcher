@@ -360,6 +360,27 @@ Canonical target-first runtime selection uses:
 6. configured `runtime.version`
 7. `recommended`
 
+### Prebuilt runtime bundles
+
+For one direct `command`, `server`, or `client` execution, use a packaged
+runtime bundle without treating it as a development checkout:
+
+```bash
+cncf --runtime-bundle-dir /opt/cncf-runtime-bundle server
+```
+
+The directory must provide `target/cncf.d/runtime-classpath.txt` and a sealed
+`lib` directory of JARs. Every classpath entry must remain beneath that `lib`
+directory, and exactly one JAR must embed `META-INF/cncf/runtime.yaml` with
+`schemaVersion: 1`, `runtime: cncf`, and a version. The launcher checks that
+version against component runtime requirements before invocation.
+
+`--runtime-bundle-dir` is direct-execution only. It cannot be combined with
+`--runtime`, `--runtime-selection`, `--runtime-no-compatible`, or
+`--runtime-dev-dir`; it is neither configuration nor an `install-cli` input.
+Bundle execution uses only the listed JARs and does not use a resolver,
+development runtime, build file, or fallback runtime selection.
+
 `cncf runtime use <version>` writes project scope when the current directory
 already has `.cncf/`; otherwise it writes global scope. Use `--project` or
 `--global` to force the target.

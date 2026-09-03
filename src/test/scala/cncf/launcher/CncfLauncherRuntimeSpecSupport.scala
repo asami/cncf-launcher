@@ -1,6 +1,6 @@
 /*
  * @since   Aug. 28, 2026
- * @version Aug. 28, 2026
+ * @version Aug. 29, 2026
  * @author  ASAMI, Tomoharu
  */
 package cncf.launcher
@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 import scala.util.Try
 import io.circe.syntax.*
 import LifecycleSupervisorProtocol.given
@@ -815,7 +816,7 @@ trait CncfLauncherRuntimeSpecSupport extends CncfLauncherSpecSupport {
     outageinvoker.lastArgs.indexOf("server") should be > 0
 
     When("a supervisor-created server command supplies its opaque instance identity")
-    val correlatedinstanceid = "30303030-3030-4030-8030-303030303030"
+    val correlatedinstanceid = "30303030403040308030303030303030"
     val correlatedcode = launcher.run(Vector("server", s"--textus.control-center.registration-instance-id=$correlatedinstanceid"))
 
     Then("the launcher reuses that identity for registration while withholding the internal argument from the runtime")
@@ -823,6 +824,15 @@ trait CncfLauncherRuntimeSpecSupport extends CncfLauncherSpecSupport {
     _assert_equals(reporter.starts.size, 4)
     _assert_equals(reporter.starts.last._1.instanceId, correlatedinstanceid)
     invoker.lastArgs should not contain s"--textus.control-center.registration-instance-id=$correlatedinstanceid"
+
+    And("an arbitrary registration identity is supplied")
+    val malformedinstanceid = "supervisor-instance-not-opaque"
+    val malformedcode = launcher.run(Vector("server", s"--textus.control-center.registration-instance-id=$malformedinstanceid"))
+
+    Then("the Launcher does not promote the malformed identity into durable registration correlation")
+    _assert_equals(malformedcode, 0)
+    _assert_equals(reporter.starts.size, 5)
+    reporter.starts.last._1.instanceId should not be malformedinstanceid
   }
 
   def controlCenterConfigAppliesOnlyToCurrentProject(): Unit = _with_temp_paths { paths =>
@@ -879,6 +889,19 @@ trait CncfLauncherRuntimeSpecSupport extends CncfLauncherSpecSupport {
     val reporter = FakeCncfTextusControlCenterRegistrationReporter()
     val invoker = FakeInvoker()
     val launcher = new CncfLauncher(paths, FakeResolver(), invoker, registrationreporter = reporter)
+
+    Then("an explicit locator timeout remains honored")
+    CncfTextusControlCenterStandaloneLocator.resolve(paths).map(_.config.timeout) shouldBe Some(java.time.Duration.ofSeconds(2))
+
+    When("the locator omits its optional timeout")
+    val explicitlocator = Files.readString(locator)
+    _write(locator, explicitlocator.replace("timeout: 2s\n", ""))
+
+    Then("the standalone locator applies the five-second registration default")
+    CncfTextusControlCenterStandaloneLocator.resolve(paths).map(_.config.timeout) shouldBe Some(java.time.Duration.ofSeconds(5))
+
+    Given("the explicit timeout fixture is restored")
+    _write(locator, explicitlocator)
 
     When("both canonical CNCF server forms run without inline registration configuration")
     val currentprojectcode = launcher.run(Vector("server", "--textus.server.port=18014"))
@@ -1768,5 +1791,32 @@ trait CncfLauncherRuntimeSpecSupport extends CncfLauncherSpecSupport {
     capped should contain("bounded-fresh")
     recovered should contain allOf ("recovered", "textus-writer")
     recovery.map(Files.readString) shouldBe Some("{malformed")
+  }
+
+  def localServerEvidenceRetainsSupervisorProcessIdentity(): Unit = _with_temp_paths { paths =>
+    import CncfLocalServerEvidenceSnapshot.given
+
+    Given("a Supervisor-compatible opaque registration identity and current Launcher process")
+    val instanceid = "30303030403040308030303030303030"
+    val report = _local_evidence_report(instanceid)
+    val store = CncfLocalServerEvidenceStore(paths)
+
+    When("the Launcher records the server evidence session")
+    store.started(report, "cncf")
+    val entry = store.detailProjection(instanceid).toOption.flatten.map(_.entry)
+    val listed = store.listProjection().toOption.flatMap(_.entries.find(_.instanceId == instanceid))
+    val legacy =
+      s"""{"schema":"${CncfLocalServerEvidenceSnapshot.Schema}","entries":[{"launcherKind":"cncf","instanceId":"legacy","target":"legacy","artifactId":null,"executionMode":"development","developmentDirectory":null,"subsystemName":null,"subsystemVersion":null,"runtimeVersion":"0.5.0","startedAt":"2026-08-01T00:00:00Z","lastSeenAt":"2026-08-01T00:00:00Z","stoppedAt":"2026-08-01T00:00:01Z"}]}"""
+    _write(paths.serverEvidence, legacy)
+    val decodedlegacy = CncfLocalServerEvidenceStore(paths).detailProjection("legacy").toOption.flatten.map(_.entry)
+
+    Then("the opaque ID and exact process identity are durable while legacy v1 evidence remains readable")
+    entry.map(_.instanceId) shouldBe Some(instanceid)
+    entry.flatMap(_.processId) shouldBe Some(ProcessHandle.current().pid)
+    entry.flatMap(_.processStartedAt) shouldBe ProcessHandle.current().info.startInstant.toScala
+    listed.flatMap(_.processId) shouldBe Some(ProcessHandle.current().pid)
+    listed.flatMap(_.processStartedAt) shouldBe ProcessHandle.current().info.startInstant.toScala
+    decodedlegacy.map(_.processId) shouldBe Some(None)
+    decodedlegacy.map(_.processStartedAt) shouldBe Some(None)
   }
 }

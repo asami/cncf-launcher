@@ -189,7 +189,7 @@ private[launcher] final class CncfLauncherServerSupport(
     args.collectFirst {
       case value if value.startsWith("--textus.control-center.registration-instance-id=") =>
         value.stripPrefix("--textus.control-center.registration-instance-id=").trim
-    }.filter(_.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+    }.filter(_.matches("(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})"))
 
   private[launcher] def _runtime_command_args(args: Vector[String]): Vector[String] =
     args.filterNot(_.startsWith("--textus.control-center.registration-instance-id="))

@@ -429,6 +429,7 @@ object CncfLauncherSpecManualMain {
       spec.controlCenterConfigAppliesOnlyToCurrentProject()
       spec.localServerEvidenceProjection()
       spec.localServerEvidenceRetentionAndRecovery()
+      spec.localServerEvidenceRetainsSupervisorProcessIdentity()
       spec.standaloneControlCenterLocatorLifecycle()
       spec.textusControlCenterRegistrationHttpLifecycle()
       spec.textusControlCenterRegistrationHttpFailureIsolation()

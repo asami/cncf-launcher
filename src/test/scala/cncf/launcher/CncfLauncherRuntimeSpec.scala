@@ -409,6 +409,14 @@ final class CncfLauncherRuntimeSpec extends AnyWordSpec with CncfLauncherRuntime
         outcome.get shouldBe ()
       }
 
+      "local server evidence retains Supervisor process identity" in {
+        Given("the cncf launcher scenario: localServerEvidenceRetainsSupervisorProcessIdentity")
+        When("the launcher behavior is exercised")
+        val outcome = scala.util.Try(localServerEvidenceRetainsSupervisorProcessIdentity())
+        Then("the executable specification holds through scenario-specific expectations")
+        outcome.get shouldBe ()
+      }
+
     }
   }
 }

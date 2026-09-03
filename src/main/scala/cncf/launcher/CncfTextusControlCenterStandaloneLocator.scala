@@ -8,7 +8,7 @@ import java.time.Duration
 
 /*
  * @since   Jul. 19, 2026
- * @version Aug.  9, 2026
+ * @version Aug. 29, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfTextusControlCenterStandaloneRegistration(
@@ -38,7 +38,7 @@ object CncfTextusControlCenterStandaloneLocator {
         credentialref <- values.get("credentialRef")
         credential <- _credential(root, credentialref)
         token <- _token(credential)
-        timeout <- _duration(values.getOrElse("timeout", "2s"))
+        timeout <- _duration(values.getOrElse("timeout", "5s"))
         heartbeatinterval <- _duration(values.getOrElse("heartbeatInterval", "30s"))
         hostlabel <- values.get("hostLabel").filter(_.matches("[A-Za-z0-9._-]+"))
       } yield CncfTextusControlCenterStandaloneRegistration(

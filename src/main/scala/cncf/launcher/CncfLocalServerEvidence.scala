@@ -7,6 +7,7 @@ import java.nio.file.StandardOpenOption.{CREATE, WRITE}
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{Executors, TimeUnit}
+import scala.jdk.OptionConverters.*
 
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
@@ -15,7 +16,7 @@ import io.circe.syntax.*
 
 /*
  * @since   Jul. 22, 2026
- * @version Jul. 22, 2026
+ * @version Aug. 28, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfLocalServerEvidenceEntry(
@@ -30,7 +31,9 @@ final case class CncfLocalServerEvidenceEntry(
   runtimeVersion: String,
   startedAt: Instant,
   lastSeenAt: Instant,
-  stoppedAt: Option[Instant]
+  stoppedAt: Option[Instant],
+  processId: Option[Long] = None,
+  processStartedAt: Option[Instant] = None
 )
 
 final case class CncfLocalServerEvidenceSnapshot(
@@ -49,7 +52,9 @@ final case class CncfLocalServerEvidenceListEntry(
   runtimeVersion: String,
   startedAt: Instant,
   lastSeenAt: Instant,
-  stoppedAt: Option[Instant]
+  stoppedAt: Option[Instant],
+  processId: Option[Long],
+  processStartedAt: Option[Instant]
 )
 
 final case class CncfLocalServerEvidenceListProjection(
@@ -107,7 +112,9 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
             entry.runtimeVersion,
             entry.startedAt,
             entry.lastSeenAt,
-            entry.stoppedAt
+            entry.stoppedAt,
+            entry.processId,
+            entry.processStartedAt
           )
         }
       )
@@ -133,7 +140,9 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
         report.runtimeVersion,
         report.startedAt,
         now,
-        None
+        None,
+        Some(ProcessHandle.current().pid),
+        ProcessHandle.current().info.startInstant.toScala
       )
     }
 
