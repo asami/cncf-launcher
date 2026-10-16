@@ -7,6 +7,7 @@ import java.nio.file.StandardOpenOption.{CREATE, WRITE}
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{Executors, TimeUnit}
+import scala.jdk.OptionConverters.*
 
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
@@ -15,7 +16,7 @@ import io.circe.syntax.*
 
 /*
  * @since   Jul. 22, 2026
- * @version Jul. 22, 2026
+ * @version Oct. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class CncfLocalServerEvidenceEntry(
@@ -30,7 +31,9 @@ final case class CncfLocalServerEvidenceEntry(
   runtimeVersion: String,
   startedAt: Instant,
   lastSeenAt: Instant,
-  stoppedAt: Option[Instant]
+  stoppedAt: Option[Instant],
+  processId: Option[Long] = None,
+  processStartedAt: Option[Instant] = None
 )
 
 final case class CncfLocalServerEvidenceSnapshot(
@@ -121,6 +124,9 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
   def started(report: CncfTextusControlCenterRegistrationReport, launcherkind: String): Unit =
     _update { entries =>
       val now = Instant.now()
+      val process = ProcessHandle.current()
+      val nativeinstant = process.info().startInstant().toScala
+      val processidentity = nativeinstant.filter(_ => process.pid() > 0L)
       entries.filterNot(_.instanceId == report.instanceId) :+ CncfLocalServerEvidenceEntry(
         launcherkind,
         report.instanceId,
@@ -133,7 +139,9 @@ final class CncfLocalServerEvidenceStore(paths: LauncherPaths) {
         report.runtimeVersion,
         report.startedAt,
         now,
-        None
+        None,
+        processidentity.map(_ => process.pid()),
+        processidentity
       )
     }
 

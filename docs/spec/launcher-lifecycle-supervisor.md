@@ -203,11 +203,26 @@ port is persisted as process ownership.
 
 For a supervisor-created child, the supervisor injects that opaque instance ID
 as launcher-internal registration metadata. The child `cncf` launcher reuses it
-for Control Center registration and every heartbeat, but removes the metadata
-before invoking the Textus runtime. Thus a lifecycle result and an observed
+for durable local evidence, Control Center registration and every heartbeat.
+The value of `--textus.control-center.registration-instance-id=` is trimmed
+and accepted as a nonempty opaque string, including Supervisor 32hex IDs and
+legacy UUIDs; it has no UUID-only shape restriction. Missing, empty or
+whitespace-only metadata produces a fresh UUID. The Launcher removes only
+arguments with this exact internal option prefix before invoking the Textus
+runtime, retaining every other argument's order and spelling. Thus a lifecycle result and an observed
 runtime instance can be joined by the same ID without treating a rejected,
 timed-out, or unavailable lifecycle request as authority over registration or
 an independently launched process.
+
+[SupervisorInstanceCorrelationSpec](../../src/test/scala/cncf/launcher/SupervisorInstanceCorrelationSpec.scala)
+specifies at least 50 successful generated cases of each of the 32hex, UUID
+and other opaque identity forms, with zero discarded cases. It crosses the
+public Launcher boundary with recording runtime and registration doubles,
+checks durable stopped evidence and closed registration, and covers fresh UUID
+fallback and withholding empty internal metadata. It does not claim native
+child or recovery acceptance. Canonical Supervisor fixtures separately retain
+only their originally acquired child handles for failure cleanup; that
+test-owned cleanup does not replace production evidence-based reconstruction.
 
 Child standard output and standard error are inherited by the supervisor
 process instead of being left in unread pipes, so server logging cannot block a
@@ -230,3 +245,34 @@ fail-closed for later lifecycle operations and returns
 `supervisor-state-unavailable`. It does not use an in-memory ownership record
 to control or reject a later child after the durable ledger has become
 unavailable.
+
+## Optional native invocation identity
+
+The shared `cncf.launcher.server-evidence.v1` entry appends optional
+`processId` and `processStartedAt`. A new invocation captures the current
+Launcher JVM's positive PID and native `ProcessHandle.info.startInstant`
+together, once at start. If the native start instant is unavailable both
+fields remain absent. Registration time, wall-clock time and guessed process
+identity are never substitutes. Heartbeat and normal termination preserve the
+tuple, including tuples written by Textus Launcher during read/modify/write.
+
+Legacy v1 records with missing or null optional fields remain valid and are
+retained without backfill or malformed-evidence quarantine. Existing positional
+entry construction remains source-compatible through appended defaults; this
+does not promise binary ABI compatibility or a schema migration.
+
+These fields are private invocation observations. The safe evidence list keeps
+its existing public fields and excludes both native fields and the development
+directory. Separately protected detail may return the exact full local entry.
+Neither notification nor the public Supervisor request/result gains process
+metadata. Only Supervisor may recover lifecycle ownership, using its existing
+exact instance/profile/artifact/directory and live native PID/start-instant
+checks. Missing, stale, ambiguous or mismatched evidence still fails closed.
+Launcher adds no process discovery, signalling, child ownership or daemon.
+
+[ServerEvidenceProcessIdentitySpec](../../src/test/scala/cncf/launcher/ServerEvidenceProcessIdentitySpec.scala)
+specifies actual-store native identity preservation in at least 50 generated
+successful cases with zero discards (EP1), legacy wire and positional-source
+compatibility (EP2), other-kind tuple preservation (EP3), and list/detail privacy
+(EP4). Wire compatibility input does not establish another writer process or
+child ownership; canonical-child and final packaged acceptance remain separate.

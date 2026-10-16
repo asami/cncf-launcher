@@ -13,7 +13,7 @@ import io.circe.syntax.*
  *  version May. 27, 2026
  *  version Jul. 28, 2026
  *  version Aug. 14, 2026
- * @version Oct. 16, 2026
+ * @version Oct. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -567,11 +567,11 @@ final class CncfLauncher(
       Some(CncfTextusControlCenterRegistrationReport(
         instanceId = _registration_instance_id(command.args).getOrElse(java.util.UUID.randomUUID().toString),
         target = target.name,
-        artifactId = target.artifactId,
-        executionMode = target.executionMode,
-        developmentDirectory = target.developmentDirectory,
-        subsystemName = target.subsystemName,
-        subsystemVersion = target.subsystemVersion,
+        artifactId = target.artifactid,
+        executionMode = target.executionmode,
+        developmentDirectory = target.developmentdirectory,
+        subsystemName = target.subsystemname,
+        subsystemVersion = target.subsystemversion,
         runtimeVersion = runtimeversion,
         startedAt = java.time.Instant.now()
       ))
@@ -636,18 +636,18 @@ final class CncfLauncher(
     args.collectFirst {
       case value if value.startsWith("--textus.control-center.registration-instance-id=") =>
         value.stripPrefix("--textus.control-center.registration-instance-id=").trim
-    }.filter(_.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+    }.filter(_.nonEmpty)
 
   private def _runtime_command_args(args: Vector[String]): Vector[String] =
     args.filterNot(_.startsWith("--textus.control-center.registration-instance-id="))
 
   private final case class RegistrationTarget(
     name: String,
-    artifactId: Option[String],
-    executionMode: String,
-    developmentDirectory: Option[String],
-    subsystemName: Option[String],
-    subsystemVersion: Option[String]
+    artifactid: Option[String],
+    executionmode: String,
+    developmentdirectory: Option[String],
+    subsystemname: Option[String],
+    subsystemversion: Option[String]
   )
 
   private def _registration_target(args: Vector[String]): RegistrationTarget = {
