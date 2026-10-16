@@ -4,7 +4,8 @@ package cncf.launcher
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug. 12, 2026
+ *  version Aug. 12, 2026
+ * @version Oct. 16, 2026
  * @author  ASAMI, Tomoharu
  */
 sealed trait CncfCommand
@@ -814,7 +815,7 @@ object CncfCommandParser {
       |  CNCF_LAUNCHER_DEV_DIR directly selects a local cncf-launcher checkout.
       |  --launcher-home <dir> selects an explicit Launcher state-home root for isolated integration tests; omit it in normal operation, where cncf server uses ~/.cncf.
       |  cncf launcher evidence projects Launcher-owned shared server evidence without starting a service; list omits development directories and show returns one protected local-detail record.
-      |  cncf launcher lifecycle internally ensures the authenticated local lifecycle authority using ~/.cncf/launcher/supervisor.yaml. The foreground supervisor serve command is diagnostic-only and is not required for cncf server or Control Center operations.
+      |  Legacy launcher supervisor serve and lifecycle ensure/submit/lookup commands are retired diagnostics (launcher-lifecycle-authority-retired). Use protected Control Center lifecycle Operations backed by textus-supervisor.
       |  Config development.enabled=true activates development.launcher.dev-dir and development.runtime.dev-dir.
       |  Config development.launcher.enabled and development.runtime.enabled override the common development switch independently.
       |  An enabled development selection requires its dev-dir unless a direct environment override supplies one.

@@ -20,7 +20,8 @@ import LifecycleSupervisorStateStore.given
  * @since   May. 17, 2026
  *  version Jun. 29, 2026
  *  version Jul. 28, 2026
- * @version Aug. 14, 2026
+ *  version Aug. 14, 2026
+ * @version Oct. 16, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherSpec {
@@ -225,7 +226,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       }
     }
 
-    "lifecycle supervisor development profile" which {
+    "historical lifecycle supervisor prototype and compatibility diagnostics" which {
       "resolve a retained CAR development directory without a supervisor YAML mapping" in {
         lifecycleSupervisorResolvesRetainedDevelopmentProfile()
       }
@@ -286,20 +287,32 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         lifecycleSupervisorFailsClosedWhenRestartFailureCannotBePersisted()
       }
 
-      "submit lifecycle work only after the Launcher-internal authority boundary is ensured" in {
-        lifecycleSupervisorLifecycleCommandUsesInternalAuthority()
+      "reject lifecycle submit without ensuring the historical Launcher authority" in {
+        Given("a historical Launcher command compatibility scenario")
+        When("the retired entry point is exercised")
+        val outcome = scala.util.Try(lifecycleSupervisorLifecycleCommandUsesInternalAuthority())
+        Then("retirement preserves safe diagnostics and prevents authority execution")
+        outcome.get shouldBe ()
       }
 
       "wait for a cold local authority before declaring the bounded lifecycle path unavailable" in {
         lifecycleSupervisorAuthorityWaitsForColdStart()
       }
 
-      "start the foreground daemon from private loopback configuration" in {
-        lifecycleSupervisorDaemonUsesPrivateLoopbackConfiguration()
+      "retire foreground daemon execution while preserving its parser" in {
+        Given("a historical Launcher command compatibility scenario")
+        When("the retired entry point is exercised")
+        val outcome = scala.util.Try(lifecycleSupervisorDaemonUsesPrivateLoopbackConfiguration())
+        Then("retirement preserves safe diagnostics and prevents authority execution")
+        outcome.get shouldBe ()
       }
 
-      "reject unsafe daemon configuration and a missing credential before host startup" in {
-        lifecycleSupervisorDaemonRejectsUnsafeConfigurationOrCredential()
+      "retire daemon execution regardless of historical configuration or credential" in {
+        Given("a historical Launcher command compatibility scenario")
+        When("the retired entry point is exercised")
+        val outcome = scala.util.Try(lifecycleSupervisorDaemonRejectsUnsafeConfigurationOrCredential())
+        Then("retirement preserves safe diagnostics and prevents authority execution")
+        outcome.get shouldBe ()
       }
 
       "bind the foreground daemon host to loopback until interruption" in {
@@ -1994,7 +2007,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       When("the reporter starts and closes one server registration session")
       val session = CncfTextusControlCenterRegistrationReporter.System.start(config, report, Some("test-token"))
+      _await_registration(requests.size >= 1)
       session.close()
+      _await_registration(requests.size >= 2)
       session.close()
 
       Then("it sends one register and one deregister operation with the configured bearer credential")
@@ -2014,7 +2029,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       When("the ready framework snapshot activates the registration")
       val explicitpathsession = CncfTextusControlCenterRegistrationReporter.System.start(config, report, Some("test-token"))
+      _await_registration(requests.size >= 1)
       explicitpathsession.close()
+      _await_registration(requests.size >= 2)
 
       Then("the registration preserves its public authority while composing the explicit application path")
       _assert_equals(requests.size, 2)
@@ -2028,7 +2045,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       When("the public-base registration activates and closes")
       val noappsession = CncfTextusControlCenterRegistrationReporter.System.start(config, report, Some("test-token"))
+      _await_registration(requests.size >= 1)
       noappsession.close()
+      _await_registration(requests.size >= 2)
 
       Then("the public registration base is retained while applicationUrl is omitted")
       _assert_equals(requests.size, 2)
@@ -2093,7 +2112,9 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       When("the launcher activates from the coherent snapshot")
       val interleavingsession = CncfTextusControlCenterRegistrationReporter.System.start(config.copy(baseUrl = ""), report, Some("test-token"))
+      _await_registration(requests.size >= 1)
       interleavingsession.close()
+      _await_registration(requests.size >= 2)
 
       Then("register and deregister retain only atomic generation A")
       _assert_equals(requests.size, 2)
@@ -2114,6 +2135,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
         report,
         Some("test-token")
       )
+      _await_registration(requests.size >= 1)
       sys.props.update(applicationpathpropertykey, "/web/changed-after-activation")
       sys.props.update(baseurlpropertykey, "http://127.0.0.1:39000")
       _publish_snapshot_("http://127.0.0.1:39000", "/web/changed-after-activation")
@@ -2121,6 +2143,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       while (requests.iterator.asScala.count(_._1.contains("heartbeat-subsystem")) < 2 && System.nanoTime() < recoverydeadline)
         Thread.sleep(10L)
       recoveringsession.close()
+      _await_registration(requests.iterator.asScala.exists(_._1.contains("/deregister-subsystem?")))
       val recoveryrequests = requests.iterator.asScala.map(_._1).toVector
 
       Then("the launcher retains running state and retries heartbeat without registering as starting again")
@@ -2164,11 +2187,11 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
   def textusControlCenterRegistrationHttpFailureIsolation(): Unit = {
     Given("a Textus Control Center endpoint that rejects a launcher registration")
-    val requests = scala.collection.mutable.ArrayBuffer.empty[String]
+    val requests = new ConcurrentLinkedQueue[String]()
     val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/", new HttpHandler {
       override def handle(exchange: HttpExchange): Unit = {
-        requests += exchange.getRequestURI.toString
+        requests.add(exchange.getRequestURI.toString)
         exchange.sendResponseHeaders(401, -1)
         exchange.close()
       }
@@ -2206,12 +2229,13 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
 
       When("the reporter receives authorization rejection for registration")
       val session = CncfTextusControlCenterRegistrationReporter.System.start(config, report, Some("rejected-token"))
+      _await_registration(requests.size >= 1)
       session.close()
 
       Then("it records one bounded registration attempt and never deregisters an unregistered subsystem")
       _assert_equals(requests.size, 1)
-      requests.exists(_.contains("register-subsystem")) shouldBe true
-      requests.exists(_.contains("deregister-subsystem")) shouldBe false
+      requests.iterator.asScala.exists(_.contains("register-subsystem")) shouldBe true
+      requests.iterator.asScala.exists(_.contains("deregister-subsystem")) shouldBe false
     } finally {
       previousbaseurl match {
         case Some(value) => sys.props.update(baseurlpropertykey, value)
@@ -2274,6 +2298,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       while (registrations.size < 2 && System.nanoTime() < deadline)
         Thread.sleep(10L)
       session.close()
+      _await_registration(registrations.iterator.asScala.exists(_.contains("/deregister-subsystem?")))
 
       Then("the failed lifecycle request creates no process authority and does not suppress registration, heartbeat, or deregistration")
       rejected should include(LifecycleSupervisorProfileResolver.PROFILE_UNAVAILABLE)
@@ -4272,26 +4297,20 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   }
 
   def lifecycleSupervisorDaemonUsesPrivateLoopbackConfiguration(): Unit = _with_temp_paths { paths =>
-    Given("a private supervisor configuration and its environment-only credential")
+    Given("a private historical supervisor configuration and a host spy")
     _write(paths.supervisorConfig, _supervisor_yaml("local-supervisor", 18014, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN"))
     val host = FakeLifecycleSupervisorDaemonHost()
-    val launcher = new CncfLauncher(
-      paths,
-      FakeResolver(),
-      FakeInvoker(),
-      environment = Map("CNCF_LIFECYCLE_SUPERVISOR_TOKEN" -> "private-token"),
-      supervisorhost = host
-    )
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), supervisorhost = host)
 
-    When("the launcher starts the foreground supervisor command")
-    val code = launcher.run(Vector("launcher", "supervisor", "serve"))
+    When("the compatibility foreground command is invoked")
+    val error = intercept[CncfException] { launcher.run(Vector("launcher", "supervisor", "serve")) }
 
-    Then("it delegates only validated configuration and the resolved credential without loading a CNCF runtime")
-    code shouldBe 0
+    Then("the parser shape remains but its execution is retired before hosting")
+    error.getMessage shouldBe "launcher-lifecycle-authority-retired"
     CncfCommandParser.parse(Vector("launcher", "supervisor", "serve")) shouldBe CncfCommand.Supervisor.Serve
-    host.configurations shouldBe Vector(LifecycleSupervisorDaemonConfiguration("local-supervisor", 18014, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN"))
-    host.tokens shouldBe Vector("private-token")
-    host.paths shouldBe Vector(paths)
+    host.configurations shouldBe empty
+    host.tokens shouldBe empty
+    host.paths shouldBe empty
   }
 
   def lifecycleSupervisorDaemonRejectsUnsafeConfigurationOrCredential(): Unit = _with_temp_paths { paths =>
@@ -4301,7 +4320,7 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     val host = FakeLifecycleSupervisorDaemonHost()
     val invalidlauncher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), supervisorhost = host)
 
-    When("the launcher resolves the malformed configuration")
+    When("the compatibility command is invoked with both historical configuration states")
     val invaliderror = intercept[CncfException] {
       invalidlauncher.run(Vector("launcher", "supervisor", "serve"))
     }
@@ -4310,10 +4329,10 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
       invalidlauncher.run(Vector("launcher", "supervisor", "serve"))
     }
 
-    Then("it fails before starting a host and never accepts a token value in the file")
+    Then("retirement is configuration-independent and the historical configuration parser still rejects unsafe files")
     invalid shouldBe Left(LifecycleSupervisorDaemonConfiguration.CONFIGURATION_UNAVAILABLE)
-    invaliderror.getMessage shouldBe LifecycleSupervisorDaemonConfiguration.CONFIGURATION_UNAVAILABLE
-    missingcredential.getMessage shouldBe LifecycleSupervisorDaemonConfiguration.CREDENTIAL_UNAVAILABLE
+    invaliderror.getMessage shouldBe "launcher-lifecycle-authority-retired"
+    missingcredential.getMessage shouldBe "launcher-lifecycle-authority-retired"
     host.configurations shouldBe empty
   }
 
@@ -4376,65 +4395,36 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
   }
 
   def lifecycleSupervisorLifecycleCommandUsesInternalAuthority(): Unit = _with_temp_paths { paths =>
-    Given("a configured local profile, a running loopback authority, and an injected internal authority ensurer")
-    val project = paths.cwd.resolve("component")
-    _write(project.resolve("project.yaml"), _component_project_yaml("textus-control-center", "car", "1.0.0-SNAPSHOT"))
-    val listener = new ServerSocket(0)
-    val port = listener.getLocalPort
-    listener.close()
-    _write(paths.supervisorConfig, _supervisor_yaml("local-supervisor", port, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN") + s"""profiles:
-      |  development-directory:
-      |    textus-control-center: ${project.toAbsolutePath}
-      |""".stripMargin)
-    val child = new LifecycleSupervisorChild {
-      val instanceId = "lifecycle-instance"
-      var alive = true
-      def isAlive = alive
-      def stop() = { alive = false; true }
-    }
-    val authorityserver = LifecycleSupervisorHttpServer(
-      "local-supervisor",
-      "private-token",
-      LifecycleSupervisorProfileResolver(paths),
-      Some(LifecycleSupervisorStateStore(paths, "local-supervisor")),
-      new LifecycleSupervisorChildFactory { def start(profile: LifecycleSupervisorLaunchProfile) = Right(child) }
-    ).start(port)
-    var ensured = Vector.empty[(LifecycleSupervisorDaemonConfiguration, String)]
+    Given("a compatibility lifecycle submit command and an internal authority spy")
+    var ensured = false
     val authority = new LifecycleSupervisorAuthority {
       def ensure(configuration: LifecycleSupervisorDaemonConfiguration, token: String, launcherpaths: LauncherPaths) = {
-        ensured :+= configuration -> token
+        ensured = true
         Right(())
       }
     }
     val output = new java.io.ByteArrayOutputStream()
-    val launcher = new CncfLauncher(
-      paths,
-      FakeResolver(),
-      FakeInvoker(),
-      environment = Map("CNCF_LIFECYCLE_SUPERVISOR_TOKEN" -> "private-token"),
-      supervisorauthority = authority
-    )
-    try {
-      When("Control Center's bounded lifecycle command submits a start request")
-      val code = Console.withOut(new java.io.PrintStream(output)) {
-        launcher.run(Vector(
-          "launcher", "lifecycle", "submit",
-          "--request-id", "request-1",
-          "--idempotency-key", "key-1",
-          "--artifact-id", "textus-control-center",
-          "--action", "start",
-          "--operator-subject-id", "operator-1",
-          "--deadline-at", java.time.Instant.now().plusSeconds(60).toString
-        ))
-      }
+    val launcher = new CncfLauncher(paths, FakeResolver(), FakeInvoker(), supervisorauthority = authority)
 
-      Then("it first ensures Launcher authority and returns only the safe lifecycle result")
-      code shouldBe 0
-      ensured shouldBe Vector(LifecycleSupervisorDaemonConfiguration("local-supervisor", port, "CNCF_LIFECYCLE_SUPERVISOR_TOKEN") -> "private-token")
-      output.toString(StandardCharsets.UTF_8) should include("\"requestId\":\"request-1\"")
-      output.toString(StandardCharsets.UTF_8) should include("\"instanceId\":\"lifecycle-instance\"")
-      CncfCommandParser.parse(Vector("launcher", "lifecycle", "lookup", "request-1")) shouldBe CncfCommand.Lifecycle.Lookup("request-1")
-    } finally authorityserver.stop(0)
+    When("the compatibility path submits a request")
+    val stream = new java.io.PrintStream(output)
+    val code = try Console.withOut(stream) {
+      launcher.run(Vector(
+        "launcher", "lifecycle", "submit",
+        "--request-id", "request-1", "--idempotency-key", "key-1",
+        "--artifact-id", "textus-control-center", "--action", "start",
+        "--operator-subject-id", "operator-1",
+        "--deadline-at", java.time.Instant.now().plusSeconds(60).toString
+      ))
+    } finally stream.close()
+
+    Then("it echoes safe rejected identity without ensuring authority")
+    code shouldBe 0
+    ensured shouldBe false
+    output.toString(StandardCharsets.UTF_8) should include("\"requestId\":\"request-1\"")
+    output.toString(StandardCharsets.UTF_8) should include("launcher-lifecycle-authority-retired")
+    output.toString(StandardCharsets.UTF_8) should include("\"state\":\"rejected\"")
+    CncfCommandParser.parse(Vector("launcher", "lifecycle", "lookup", "request-1")) shouldBe CncfCommand.Lifecycle.Lookup("request-1")
   }
 
   def lifecycleSupervisorAuthorityWaitsForColdStart(): Unit = _with_temp_paths { paths =>
@@ -4520,8 +4510,15 @@ final class CncfLauncherSpec extends AnyWordSpec with Matchers with GivenWhenThe
     (code, out.toString, err.toString)
   }
 
+  private def _await_registration(condition: => Boolean): Unit = {
+    val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
+    while (!condition && System.nanoTime() < deadline) Thread.sleep(5L)
+    condition shouldBe true
+  }
+
   private def _with_temp_paths(f: LauncherPaths => Unit): Unit = {
-    val root = Files.createTempDirectory("cncf-launcher-spec-")
+    val fixtureparent = Files.createDirectories(Path.of("target", "launcher-spec-fixtures"))
+    val root = Files.createTempDirectory(fixtureparent, "cncf-launcher-spec-").toAbsolutePath.normalize
     val home = root.resolve("home")
     val cwd = root.resolve("work")
     Files.createDirectories(home)

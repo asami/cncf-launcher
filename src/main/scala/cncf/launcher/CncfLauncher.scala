@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util.zip.ZipFile
 import scala.util.Try
+import scala.util.control.NonFatal
 
 import io.circe.syntax.*
 
@@ -11,7 +12,8 @@ import io.circe.syntax.*
  * @since   May. 17, 2026
  *  version May. 27, 2026
  *  version Jul. 28, 2026
- * @version Aug. 14, 2026
+ *  version Aug. 14, 2026
+ * @version Oct. 16, 2026
  * @author  ASAMI, Tomoharu
  */
 final class CncfLauncher(
@@ -33,6 +35,13 @@ final class CncfLauncher(
 
   private def _run(args: Vector[String]): Int = {
     val (configfiles, cncfconfigfiles, commandargs) = _take_config_options(args)
+    // Parse global options before any configuration or development delegation.
+    val command = CncfCommandParser.parse(commandargs)
+    command match {
+      case supervisor: CncfCommand.Supervisor => return _run_supervisor(supervisor)
+      case lifecycle: CncfCommand.Lifecycle => return _run_lifecycle(lifecycle)
+      case _ => ()
+    }
     val effectivecncfconfigfiles = _implicit_control_center_config(commandargs, cncfconfigfiles)
     val config = LauncherConfig.load(paths, configfiles, environment)
       .mergeHigher(LauncherConfig(cncfConfigFiles = effectivecncfconfigfiles))
@@ -40,7 +49,6 @@ final class CncfLauncher(
       case Some(code) => return code
       case None => ()
     }
-    val command = CncfCommandParser.parse(commandargs)
     command match {
       case CncfCommand.LauncherVersion =>
         println(s"${LauncherBuildInfo.name} ${LauncherBuildInfo.version}")
@@ -102,52 +110,15 @@ final class CncfLauncher(
   }
 
   private def _run_supervisor(command: CncfCommand.Supervisor): Int =
-    command match {
-      case CncfCommand.Supervisor.Serve =>
-        LifecycleSupervisorDaemonConfiguration.resolve(paths).fold(code => throw CncfException(code), { configuration =>
-          environment.get(configuration.tokenEnv).filter(_.nonEmpty).fold(
-            throw CncfException(LifecycleSupervisorDaemonConfiguration.CREDENTIAL_UNAVAILABLE)
-          )(token => supervisorhost.serve(configuration, token, paths))
-        })
-    }
+    throw CncfException("launcher-lifecycle-authority-retired")
 
   private def _run_lifecycle(command: CncfCommand.Lifecycle): Int = {
     import LifecycleSupervisorProtocol.given
-    import io.circe.syntax.*
-    def configuration: Either[String, (LifecycleSupervisorDaemonConfiguration, String)] =
-      LifecycleSupervisorDaemonConfiguration.resolve(paths).flatMap { value =>
-        environment.get(value.tokenEnv).filter(_.nonEmpty).toRight(LifecycleSupervisorDaemonConfiguration.CREDENTIAL_UNAVAILABLE).map(value -> _)
-      }
-    def unavailable(request: LifecycleSupervisorRequest, code: String): Int = {
-      println(LifecycleSupervisorProtocol.rejected(request, "", code).asJson.noSpaces)
-      0
-    }
     command match {
-      case CncfCommand.Lifecycle.Ensure =>
-        configuration.fold(code => throw CncfException(code), { case (value, token) =>
-          supervisorauthority.ensure(value, token, paths).fold(code => throw CncfException(code), _ => {
-            println(s"{\"supervisorId\":\"${value.supervisorId}\",\"state\":\"available\"}")
-            0
-          })
-        })
       case CncfCommand.Lifecycle.Submit(request) =>
-        configuration.fold(code => unavailable(request, code), { case (value, token) =>
-          supervisorauthority.ensure(value, token, paths).fold(code => unavailable(request, code), _ =>
-            LifecycleSupervisorHttpClient.submit(value, token, request).fold(code => unavailable(request, code), { result =>
-              println(result.asJson.noSpaces)
-              0
-            })
-          )
-        })
-      case CncfCommand.Lifecycle.Lookup(requestid) =>
-        configuration.fold(code => throw CncfException(code), { case (value, token) =>
-          supervisorauthority.ensure(value, token, paths).fold(code => throw CncfException(code), _ =>
-            LifecycleSupervisorHttpClient.lookup(value, token, requestid).fold(1) { result =>
-              println(result.asJson.noSpaces)
-              0
-            }
-          )
-        })
+        println(LifecycleSupervisorProtocol.rejected(request, "", "launcher-lifecycle-authority-retired").asJson.noSpaces)
+        0
+      case _ => throw CncfException("launcher-lifecycle-authority-retired")
     }
   }
 
@@ -466,10 +437,7 @@ final class CncfLauncher(
     val evidencesession = report.map(_local_evidence_session).getOrElse(CncfLocalServerEvidenceSession.noop)
     val registrationsession = report.map(_registration_session(effectivecommand, config, _)).getOrElse(CncfTextusControlCenterRegistrationSession.noop)
     val shutdownhook = new Thread(
-      () => {
-        registrationsession.close()
-        evidencesession.close()
-      },
+      () => _close_server_sessions(evidencesession, registrationsession),
       "cncf-server-lifecycle-shutdown"
     )
     Runtime.getRuntime.addShutdownHook(shutdownhook)
@@ -477,8 +445,7 @@ final class CncfLauncher(
       _invoke_cncf(classpath, _cncf_config_args(config) ++ _textus_knowledge_rdf_args(config) ++ _runtime_command_args(effectivecommand.args))
     } finally {
       scala.util.Try(Runtime.getRuntime.removeShutdownHook(shutdownhook))
-      registrationsession.close()
-      evidencesession.close()
+      _close_server_sessions(evidencesession, registrationsession)
     }
   }
 
@@ -609,6 +576,20 @@ final class CncfLauncher(
         startedAt = java.time.Instant.now()
       ))
     }
+
+  private def _close_server_sessions(
+    evidence: CncfLocalServerEvidenceSession,
+    registration: CncfTextusControlCenterRegistrationSession
+  ): Unit = {
+    try evidence.close()
+    catch {
+      case NonFatal(_) => Console.err.println("warning: local CNCF server evidence close failed.")
+    }
+    try registration.close()
+    catch {
+      case NonFatal(_) => Console.err.println("warning: Textus Control Center registration close failed.")
+    }
+  }
 
   private def _local_evidence_session(
     report: CncfTextusControlCenterRegistrationReport

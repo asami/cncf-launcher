@@ -1,20 +1,79 @@
-# Provisional Launcher Lifecycle Supervisor
+# Launcher Lifecycle Responsibility
 
-status = superseded-by-phase-4-reopen
-scope = Textus Control Center Phase 4 transition baseline
+status = active
+scope = canonical Launcher observation and retired Phase 4 transition baseline
 
-This document records the provisional launcher-private supervisor behavior.
-It is not the accepted Phase 4 target: `textus-supervisor` becomes lifecycle
-authority, embedded by Textus Control Center for standalone use and separately
-placeable for future distributed operation. `cncf-launcher` retains durable
-common evidence and bounded best-effort notification; it must not own new
-lifecycle request, child-ownership, or supervisor configuration state.
+## Current Responsibility
 
-The remaining sections describe only the transition baseline that must be
-removed or reduced to a compatibility adapter. They are not a contract for new
-implementation.
+`cncf server` from the current development directory and `cncf <target> server`
+retain their target and runtime resolution. The Launcher writes common durable
+start/last-seen/normal-stop evidence independently of Control Center
+availability. That evidence is observation and does not create lifecycle
+request state, child ownership, a supervisor daemon, or process-control authority.
+`textus-supervisor` owns lifecycle execution and durable ownership through the
+standard Supervisor SPI consumed by protected Control Center Operations.
 
-## Transition-Baseline Profile Configuration
+The existing opt-in Control Center registration Operations are the notification
+surface: protocol version `1`, GET selectors `register-subsystem`,
+`heartbeat-subsystem`, and `deregister-subsystem`, with the existing machine
+credential and invocation identity. No additional Supervisor Operation or
+transport is required.
+
+## Readiness and Bounded Notification
+
+Reporter `start` returns without HTTP on the server startup caller, including
+when readiness is already published or a public base is configured. One daemon
+scheduled executor per session checks coherent
+`textus.server.bound-snapshot` readiness at intervals of at most 50 ms. Only a
+version `v1` snapshot with a valid HTTP(S) origin and optional safe `/web` or
+`/web/...` application path activates notification; legacy bound-base and
+application properties are never combined. A configured valid public origin
+replaces the bound origin only after readiness. The optional application URL
+uses that same origin, and is omitted when no application path was selected.
+The session captures this snapshot once for all reports.
+
+The first request is `register-subsystem` with `starting`. Before acknowledgment,
+failed registration is retried only on later configured heartbeat intervals.
+After acknowledgment, heartbeat failures retain registration and subsequent
+reports remain `running`; they never register as `starting` again. Scheduling
+uses fixed delay after each attempt, without catch-up request bursts.
+
+Effective connect and read timeouts each round positive submillisecond settings
+up to 1 ms and cap at 5000 ms. Redirects are not followed. An attempt has at
+most one connect and one read phase, at most 10 seconds combined at the caps.
+Positive submillisecond heartbeat intervals likewise round up to 1 ms.
+Failures produce sanitized warnings without credentials, query payloads, or
+unrestricted endpoint details.
+
+Shutdown hook and `finally` share cleanup: first close local durable evidence,
+then best-effort close registration, isolating each nonfatal failure and
+preserving the original server return or exception. Session close is idempotent,
+stops periodic work, creates no executor or retry loop, and never waits for an
+in-flight register. Before activation it emits no HTTP. An acknowledged session
+attempts one terminal `deregister-subsystem`/`stopped`; an in-flight initial
+register may finish and perform that sole terminal attempt on its existing
+daemon worker. No later register or heartbeat is scheduled.
+
+## Retired Compatibility Commands
+
+The parser shapes `cncf launcher supervisor serve` and
+`cncf launcher lifecycle ensure|submit|lookup` remain for safe compatibility
+diagnostics. Serve, ensure, and lookup immediately fail with
+`launcher-lifecycle-authority-retired`. Submit returns exit code `0` and the
+existing safe rejected protocol result echoing the request identity with that
+diagnostic code. These routes do not read supervisor configuration or tokens,
+ensure or host a daemon, contact an authority, or create lifecycle state.
+Operators use protected Control Center lifecycle Operations backed by
+`textus-supervisor`. A foreground Launcher daemon is never a prerequisite.
+
+## Historical Transition Baseline (Retired)
+
+The following sections preserve the former prototype's design and internal
+implementation contracts as history only. Their descriptions do not grant
+current Launcher authority or provide an executable CLI route. Internal
+prototype specifications remain historical coverage.
+
+### Transition-Baseline Profile Configuration
 
 The standalone supervisor reads its authority configuration from exactly one
 private file: `~/.cncf/launcher/supervisor.yaml`.
@@ -62,35 +121,33 @@ value is an environment-variable name, never a token value. Unknown keys or an
 invalid daemon declaration make the configuration unavailable rather than
 falling back to a default endpoint or credential.
 
-## Internal Authority and Diagnostic Foreground Daemon
+### Internal Authority and Diagnostic Foreground Daemon
 
-`cncf launcher lifecycle ensure`, `submit`, and `lookup` are Launcher-internal
-Control Center adapters. They resolve the private profile and environment-only
-credential, then first probe the authenticated loopback authority. When it is
-absent, Launcher starts the foreground host implementation in the background,
-waits for its authenticated health response within a bounded interval, and
-only then submits or looks up a request. Its log is retained at
-`~/.cncf/launcher/supervisor.log`.
+`cncf launcher lifecycle ensure`, `submit`, and `lookup` were prototype
+Control Center adapters. They resolved a private profile and environment-only
+credential, probed an authenticated loopback authority, and could start the
+foreground host in the background before submitting or looking up a request.
+That retired flow retained its log at `~/.cncf/launcher/supervisor.log`.
 
 The authority readiness interval is bounded to ten seconds. The Control Center
 adapter reserves at least twenty seconds for this readiness interval plus the
 bounded lifecycle submission, so a normal cold start is not rejected merely
 because the authority did not already exist.
 
-This is an implementation detail, not an additional operator workflow. The
-normal public starts remain `cncf server` from a development directory and
+The prototype treated hosting as an internal detail. The
+public starts remained `cncf server` from a development directory and
 `textus <artifact> server`. Control Center receives only the safe command
 result; it neither reads the private configuration/state files nor knows the
 endpoint, credential, or authority PID.
 
-The standalone host command is retained for implementation diagnostics:
+The prototype retained this host command for implementation diagnostics:
 
 ```text
 cncf launcher supervisor serve
 ```
 
-It is not the normal launcher interface, is never a Control Center
-prerequisite, and must not replace the canonical
+It was never a normal launcher interface or Control Center prerequisite. Its
+execution is now retired; it does not replace the canonical
 development-directory invocation:
 
 ```text
@@ -109,7 +166,7 @@ loopback. It runs in the foreground until the process is interrupted, then
 stops its HTTP listener. It does not daemonize, register an operating-system
 service, start a component by itself, or expose a non-loopback endpoint.
 
-## Durable Request Records
+### Durable Request Records
 
 The supervisor persists its request/idempotency and owned-instance records in
 `~/.cncf/launcher/supervisor-state.json`. A record contains only the protocol
@@ -130,7 +187,7 @@ Identical retries return the original record. Start, stop, and restart reject
 any deployment not owned by this supervisor; no operation may search for or
 signal an arbitrary PID.
 
-## Development-Directory Execution and Port Preflight
+### Development-Directory Execution and Port Preflight
 
 The supervisor executes an accepted development-directory profile with the
 fixed, target-first command:
