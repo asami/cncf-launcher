@@ -276,3 +276,13 @@ successful cases with zero discards (EP1), legacy wire and positional-source
 compatibility (EP2), other-kind tuple preservation (EP3), and list/detail privacy
 (EP4). Wire compatibility input does not establish another writer process or
 child ownership; canonical-child and final packaged acceptance remain separate.
+
+## Integrated running notification
+
+After readiness yields one coherent registration snapshot, a successful initial
+registration or scheduled registration retry immediately attempts one
+`heartbeat-subsystem` with `launcherState=running`, using the same captured
+origin, application URL and invocation identity. Later heartbeat intervals
+retain that snapshot and acknowledgment. Closing during an in-flight initial
+registration suppresses the new heartbeat and retains the sole terminal
+notification after acknowledgment. Control Center does not register itself.

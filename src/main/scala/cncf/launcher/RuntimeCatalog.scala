@@ -9,7 +9,7 @@ import scala.util.Using
  * @since   May. 17, 2026
  *  version May. 25, 2026
  *  version Jun. 10, 2026
- * @version Aug.  9, 2026
+ * @version Aug. 27, 2026
  * @author  ASAMI, Tomoharu
  */
 final case class RuntimeCatalog(
@@ -280,8 +280,7 @@ final class RuntimeCatalogStore(paths: LauncherPaths) {
     val localversions = _local_runtime_versions()
     loadOrRefresh(config) match {
       case Some(catalog) =>
-        val catalogversions = catalog.versions.map(_.version).toSet
-        Some(catalog.copy(versions = catalog.versions ++ localversions.filterNot(v => catalogversions.contains(v.version))))
+        Some(_merge_local_versions(catalog, localversions))
       case None if localversions.nonEmpty =>
         Some(RuntimeCatalog.empty.copy(versions = localversions))
       case None =>
@@ -289,11 +288,53 @@ final class RuntimeCatalogStore(paths: LauncherPaths) {
     }
   }
 
+  def loadForSelection(
+    config: LauncherConfig,
+    requirements: Vector[RuntimeRequirement]
+  ): Option[RuntimeCatalog] = {
+    val localversions = _local_runtime_versions()
+    val cached = _load_cached_safe()
+    val initial = cached
+      .orElse(_try_refresh(config))
+      .map(catalog => _merge_local_versions(catalog, localversions))
+      .orElse {
+        if (localversions.nonEmpty)
+          Some(RuntimeCatalog.empty.copy(versions = localversions))
+        else
+          None
+      }
+    val effective = requirements.filterNot(_.isEmpty)
+    if (cached.isDefined && effective.nonEmpty && initial.exists(catalog => !_has_compatible_version(catalog, effective)))
+      _try_refresh(config).map(catalog => _merge_local_versions(catalog, localversions)).orElse(initial)
+    else
+      initial
+  }
+
   private def _load_cached_safe(): Option[RuntimeCatalog] =
     try loadCached()
     catch {
       case _: Throwable => None
     }
+
+  private def _try_refresh(config: LauncherConfig): Option[RuntimeCatalog] =
+    try Some(refresh(config))
+    catch {
+      case _: Throwable => None
+    }
+
+  private def _has_compatible_version(
+    catalog: RuntimeCatalog,
+    requirements: Vector[RuntimeRequirement]
+  ): Boolean =
+    catalog.enabledVersions.exists(version => requirements.forall(_.accepts(version.version)))
+
+  private def _merge_local_versions(
+    catalog: RuntimeCatalog,
+    localversions: Vector[RuntimeCatalogVersion]
+  ): RuntimeCatalog = {
+    val catalogversions = catalog.versions.map(_.version).toSet
+    catalog.copy(versions = catalog.versions ++ localversions.filterNot(version => catalogversions.contains(version.version)))
+  }
 
   private def _local_runtime_versions(): Vector[RuntimeCatalogVersion] =
     if (!Files.isDirectory(paths.runtimeRoot)) {

@@ -9,7 +9,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Aug.  1, 2026
- * @version Aug.  1, 2026
+ * @version Oct. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 object CncfLauncherTransportSpec {
@@ -77,9 +77,9 @@ final class CncfLauncherTransportSpec extends AnyWordSpec with Matchers with Giv
     results.packagedstatus shouldBe 0
     results.developmentstatus shouldBe 0
     results.packaged shouldBe Vector(
-      "command",
       "--textus.component=textus-sanpomap",
       "--textus.component.version=1",
+      "command",
       "--textus.web.application-mode=multi-user",
       "--cncf.web.application-mode=standalone",
       "--textus.user.fixed-id=alice",
@@ -87,8 +87,8 @@ final class CncfLauncherTransportSpec extends AnyWordSpec with Matchers with Giv
       "opaque-runtime-value"
     )
     results.development shouldBe Vector(
+      s"--repository-component-dev-dir=${results.developmenttarget}",
       "server",
-      s"--component-dev-dir=${results.developmenttarget}",
       "--textus.web.application-mode=multi-user",
       "--cncf.web.application-mode=standalone",
       "--textus.user.fixed-id=alice",

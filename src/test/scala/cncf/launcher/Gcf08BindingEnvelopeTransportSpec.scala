@@ -9,7 +9,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /*
  * @since   Aug.  3, 2026
- * @version Aug.  3, 2026
+ * @version Oct. 17, 2026
  * @author  ASAMI, Tomoharu
  */
 final class Gcf08BindingEnvelopeTransportSpec
@@ -33,13 +33,13 @@ final class Gcf08BindingEnvelopeTransportSpec
           results.packagedstatus shouldBe 0
           results.developmentstatus shouldBe 0
           results.packaged shouldBe Vector(
-            "command",
             "--textus.component=textus-sanpomap",
-            "--textus.component.version=1"
+            "--textus.component.version=1",
+            "command"
           ) ++ fixture.envelopes
           results.development shouldBe Vector(
-            "server",
-            s"--component-dev-dir=${fixture.developmenttarget}"
+            s"--repository-component-dev-dir=${fixture.developmenttarget}",
+            "server"
           ) ++ fixture.envelopes
         } finally {
           fixture.close()

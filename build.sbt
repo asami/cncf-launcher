@@ -54,10 +54,6 @@ lazy val root = (project in file("."))
     }.taskValue,
     Compile / mainClass := Some("cncf.launcher.CncfLauncherMain"),
     Test / parallelExecution := false,
-    Test / test := Def.sequential(
-      (Test / testOnly).toTask(" cncf.launcher.CanonicalServerNotificationSpec cncf.launcher.ServerEvidenceProcessIdentitySpec cncf.launcher.SupervisorInstanceCorrelationSpec"),
-      (Test / runMain).toTask(" cncf.launcher.CncfLauncherSpec")
-    ).value,
     publishTo := {
       val repo = sys.env.get("SIMPLEMODELING_MAVEN_LOCAL")
         .map(file)
