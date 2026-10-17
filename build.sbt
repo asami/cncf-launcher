@@ -55,7 +55,7 @@ lazy val root = (project in file("."))
     Compile / mainClass := Some("cncf.launcher.CncfLauncherMain"),
     Test / parallelExecution := false,
     Test / test := Def.sequential(
-      (Test / testOnly).toTask(" cncf.launcher.CanonicalServerNotificationSpec cncf.launcher.ServerEvidenceProcessIdentitySpec"),
+      (Test / testOnly).toTask(" cncf.launcher.CanonicalServerNotificationSpec cncf.launcher.ServerEvidenceProcessIdentitySpec cncf.launcher.SupervisorInstanceCorrelationSpec"),
       (Test / runMain).toTask(" cncf.launcher.CncfLauncherSpec")
     ).value,
     publishTo := {
